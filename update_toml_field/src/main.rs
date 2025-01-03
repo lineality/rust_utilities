@@ -1,12 +1,12 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};  // Added PathBuf import
 
 /// Updates a specified field in a TOML file with a new value.
 /// 
 /// # Arguments
 /// 
-/// * `path` - A string slice containing the path to the TOML file
+/// * `path` - A PathBuf containing the path to the TOML file
 /// * `new_string` - A string slice containing the new value to be set
 /// * `field` - A string slice containing the name of the field to update
 /// 
@@ -18,16 +18,18 @@ use std::path::Path;
 /// 
 /// ```
 /// # use std::fs;
+/// # use std::path::PathBuf;
 /// # fs::write("example.toml", "field = \"old_value\"").unwrap();
-/// let result = update_toml_field("example.toml", "new_value", "field");
+/// let path = PathBuf::from("example.toml");
+/// let result = update_toml_field(&path, "new_value", "field");
 /// # fs::remove_file("example.toml").unwrap();
 /// ```
-pub fn update_toml_field(path: &str, new_string: &str, field: &str) -> io::Result<()> {
-    // Read the entire file content
-    let content = fs::read_to_string(path)?;
+pub fn update_toml_field(path: &PathBuf, new_string: &str, field: &str) -> io::Result<()> {
+    // Read the entire file content using PathBuf's as_path() method
+    let content = fs::read_to_string(path.as_path())?;
     
-    // Create a temporary file
-    let temp_path = format!("{}.tmp", path);
+    // Create a temporary file with the same name plus .tmp
+    let temp_path = path.with_extension("tmp");
     let mut temp_file = File::create(&temp_path)?;
     
     let mut field_found = false;
@@ -63,7 +65,7 @@ pub fn update_toml_field(path: &str, new_string: &str, field: &str) -> io::Resul
 /// 
 /// # Arguments
 /// 
-/// * `path` - A string slice containing the path to the TOML file
+/// * `path` - A PathBuf containing the path to the TOML file
 /// * `new_string` - A string slice containing the new value to be set
 /// * `field` - A string slice containing the name of the field to update
 /// 
@@ -72,18 +74,22 @@ pub fn update_toml_field(path: &str, new_string: &str, field: &str) -> io::Resul
 /// * `Result<(), String>` - Ok(()) on success, or an error message if the operation fails
 ///
 /// Example Use:
-/// match safe_update_toml_field("config.toml", "alice", "user_name") {
+/// ```
+/// use std::path::PathBuf;
+/// let config_path = PathBuf::from("config.toml");
+/// match safe_update_toml_field(&config_path, "alice", "user_name") {
 ///     Ok(_) => println!("Successfully updated TOML file"),
 ///     Err(e) => eprintln!("Error: {}", e)
 /// }
-pub fn safe_update_toml_field(path: &str, new_string: &str, field: &str) -> Result<(), String> {
+/// ```
+pub fn safe_update_toml_field(path: &PathBuf, new_string: &str, field: &str) -> Result<(), String> {
     // Validate inputs
     if field.is_empty() {
         return Err("Field name cannot be empty".to_string());
     }
     
-    if !Path::new(path).exists() {
-        return Err(format!("File not found: {}", path));
+    if !path.exists() {
+        return Err(format!("File not found: {}", path.display()));
     }
     
     update_toml_field(path, new_string, field)
@@ -91,12 +97,16 @@ pub fn safe_update_toml_field(path: &str, new_string: &str, field: &str) -> Resu
 }
 
 fn main() {
+    // Create a PathBuf for the config file
+    let config_path = PathBuf::from("config.toml");
+
     // Create a sample TOML file if it doesn't exist
-    if !Path::new("config.toml").exists() {
-        fs::write("config.toml", "# Sample TOML file\n").expect("Failed to create config file");
+    if !config_path.exists() {
+        fs::write(&config_path, "# Sample TOML file\n")
+            .expect("Failed to create config file");
     }
 
-    match safe_update_toml_field("config.toml", "alice", "user_name") {
+    match safe_update_toml_field(&config_path, "alice", "user_name") {
         Ok(_) => println!("Successfully updated TOML file"),
         Err(e) => eprintln!("Error: {}", e)
     }
@@ -110,27 +120,20 @@ mod tests {
     
     #[test]
     fn test_update_field() {
-        // Create a test file
+        // Create a test file using PathBuf
         let test_content = "directory_path = \"old/path\"\nupdated_at_timestamp = 1735690073";
-        let test_file = "test_config.toml";
-        fs::write(test_file, test_content).expect("Failed to create test file");
+        let test_path = PathBuf::from("test_config.toml");
+        fs::write(&test_path, test_content).expect("Failed to create test file");
         
         // Update the field
-        let result = update_toml_field(test_file, "new/path", "directory_path");
+        let result = update_toml_field(&test_path, "new/path", "directory_path");
         assert!(result.is_ok());
         
         // Verify the update
-        let updated_content = fs::read_to_string(test_file).expect("Failed to read test file");
+        let updated_content = fs::read_to_string(&test_path).expect("Failed to read test file");
         assert!(updated_content.contains("directory_path = \"new/path\""));
         
         // Cleanup
-        fs::remove_file(test_file).expect("Failed to remove test file");
+        fs::remove_file(&test_path).expect("Failed to remove test file");
     }
 }
-
-// fn main() {
-//     match safe_update_toml_field("config.toml", "user_name", "alice") {
-//         Ok(_) => println!("Successfully updated TOML file"),
-//         Err(e) => eprintln!("Error: {}", e)
-//     }
-// }
