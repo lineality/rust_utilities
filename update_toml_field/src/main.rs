@@ -1,26 +1,6 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::Path;
-/*
-This implementation includes several safety features:
-
-Uses a temporary file for atomic updates
-Proper error handling throughout
-File existence checking
-Maintains the original file structure
-Includes comprehensive documentation
-Includes unit tests
-
-Key features:
-
-The function creates a new line with proper TOML formatting
-Processes the file line by line to maintain the original structure
-Uses a temporary file to ensure atomic updates
-Includes proper error handling and file safety checks
-Provides both a direct implementation and a safe wrapper function
-Includes documentation and tests
-*/
-
 
 /// Updates a specified field in a TOML file with a new value.
 /// 
@@ -90,6 +70,12 @@ pub fn update_toml_field(path: &str, new_string: &str, field: &str) -> io::Resul
 /// # Returns
 /// 
 /// * `Result<(), String>` - Ok(()) on success, or an error message if the operation fails
+///
+/// Example Use:
+/// match safe_update_toml_field("config.toml", "alice", "user_name") {
+///     Ok(_) => println!("Successfully updated TOML file"),
+///     Err(e) => eprintln!("Error: {}", e)
+/// }
 pub fn safe_update_toml_field(path: &str, new_string: &str, field: &str) -> Result<(), String> {
     // Validate inputs
     if field.is_empty() {
@@ -116,6 +102,7 @@ fn main() {
     }
 }
 
+/// run with: cargo test
 #[cfg(test)]
 mod tests {
     use super::*;
