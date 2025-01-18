@@ -40,7 +40,36 @@ a Rust program can interact with GPG (GNU Privacy Guard) through commands to ret
 use std::process::Command;
 use std::io::{self, Write};
 
+/// gpg get public key long from public key-id
+/// use std::process::Command;
+/// use std::io::{self, Write};
 fn get_armored_public_key(key_id: &str) -> io::Result<String> {
+    /*
+   // Prompt the user for the key ID
+    print!("Enter the GPG key ID: ");
+    if let Err(e) = io::stdout().flush() {
+        eprintln!("Failed to flush stdout: {}", e);
+        return;
+    }
+
+    let mut key_id = String::new();
+    if let Err(e) = io::stdin().read_line(&mut key_id) {
+        eprintln!("Failed to read line: {}", e);
+        return;
+    }
+
+    let key_id = key_id.trim(); // Remove any trailing newline or whitespace
+
+    match get_armored_public_key(key_id) {
+        Ok(armored_key) => {
+            println!("Armored Public Key:\n{}", armored_key);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+        }
+    }
+    
+    */
     // Construct the GPG command to export the public key in armored format
     let output = Command::new("gpg")
         .arg("--armor")
