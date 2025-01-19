@@ -1,5 +1,5 @@
 [package]
-name = "externalized_input_buffer"
+name = "external_user_input_buffer"
 version = "0.1.0"
 edition = "2021"
 
