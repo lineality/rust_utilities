@@ -128,7 +128,129 @@ fn read_field_from_toml(path: &str, field_name: &str) -> String {
     String::new()
 }
 
+/// Reads all fields from a TOML file that share a common base name (prefix before underscore)
+/// and returns a vector of their values. Returns an empty vector if no matching fields are found
+/// or if any errors occur.
+///
+/// # Arguments
+/// * `path` - Path to the TOML file
+/// * `base_name` - Base name to search for (e.g., "prompt" will match "prompt_1", "prompt_2", etc.)
+///
+/// # Returns
+/// * `Vec<String>` - Vector containing all values for fields matching the base name
+///
+/// # Example
+/// ```
+/// let values = read_basename_fields_from_toml("config.toml", "prompt");
+/// // For TOML content:
+/// // prompt_1 = "value1"
+/// // prompt_2 = "value2"
+/// // Returns: vec!["value1", "value2"]
+/// ```
+fn read_basename_fields_from_toml(path: &str, base_name: &str) -> Vec<String> {
+    let mut values = Vec::new();
+
+    // Validate input parameters
+    if path.is_empty() || base_name.is_empty() {
+        println!("Error: Empty path or base name provided");
+        return values;
+    }
+
+    // Open and read the file
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) => {
+            println!("Failed to open file at path: {}. Error: {}", path, e);
+            return values;
+        },
+    };
+
+    let reader = io::BufReader::new(file);
+    let base_name_with_underscore = format!("{}_", base_name);
+
+    // Process each line
+    for (line_number, line_result) in reader.lines().enumerate() {
+        let line = match line_result {
+            Ok(line) => line,
+            Err(e) => {
+                println!("Error reading line {}: {}", line_number + 1, e);
+                continue;
+            }
+        };
+
+        // Skip empty lines and comments
+        let trimmed_line = line.trim();
+        if trimmed_line.is_empty() || trimmed_line.starts_with('#') {
+            continue;
+        }
+
+        // Check if line starts with base_name_
+        if trimmed_line.starts_with(&base_name_with_underscore) {
+            // Split the line by '=' and handle malformed lines
+            let parts: Vec<&str> = trimmed_line.splitn(2, '=').collect();
+            if parts.len() != 2 {
+                println!("Malformed TOML line {} - missing '=': {}", line_number + 1, line);
+                continue;
+            }
+
+            let value = parts[1].trim();
+            
+            // Clean up the value: remove quotes and trim spaces
+            let cleaned_value = value.trim().trim_matches('"').trim();
+            
+            if !cleaned_value.is_empty() {
+                values.push(cleaned_value.to_string());
+            }
+        }
+    }
+
+    // Sort values to ensure consistent ordering
+    values.sort();
+    values
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::write;
+    use std::fs::remove_file;
+
+    #[test]
+    fn test_read_basename_fields() {
+        // Create a temporary test TOML file
+        let test_content = r#"
+            # Test TOML file
+            prompt_1 = "value1"
+            prompt_2 = "value2"
+            other_field = "other"
+            prompt_3 = "value3"
+        "#;
+        let test_file = "test_basename.toml";
+        write(test_file, test_content).unwrap();
+
+        // Test reading basename fields
+        let values = read_basename_fields_from_toml(test_file, "prompt");
+        
+        // Clean up
+        let _ = remove_file(test_file);
+
+        assert_eq!(values, vec!["value1", "value2", "value3"]);
+    }
+
+    #[test]
+    fn test_empty_input() {
+        let values = read_basename_fields_from_toml("", "prompt");
+        assert!(values.is_empty());
+    }
+}
+
+
+
 fn main() {
     let value = read_field_from_toml("test.toml", "fieldname");
     println!("Field value -> {}", value);
+    
+    // Read all prompt fields
+    let prompt_values = read_basename_fields_from_toml("config.toml", "prompt");
+    println!("Prompts: {:?}", prompt_values);
 }

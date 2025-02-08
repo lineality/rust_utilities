@@ -1,0 +1,23 @@
+# test.toml
+
+log=true
+log_dir_path="path/to/log_dir"
+
+prompt_1 = "filename1.txt"
+prompt_2 = "filename2.txt"
+prompt_3 = "filename3.txt"
+
+model_1 = "modelpath_1"
+model_2 = "modelpath_2"
+
+# to display on startup, pipe delimited |
+mode_1 = "model_n|prompt_n|mode description"
+mode_2 = "model_n|prompt_n|mode description"
+
+
+# for manual-mode
+modelpathbase_1 = "abspath/2"
+modelpathbase_2 = "abspath/2"
+
+# for manual-mode
+promptsdir_1 = "path"
