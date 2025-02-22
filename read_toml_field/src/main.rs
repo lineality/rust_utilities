@@ -1,5 +1,7 @@
+// read toml fields with vanilla rust
+
 use std::fs::File;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read};
 
 /// The function reads a single line from a TOML file that starts with a specified field name
 /// and ends with a value. The function returns an empty string if the field is not found, and
@@ -209,8 +211,121 @@ fn read_basename_fields_from_toml(path: &str, base_name: &str) -> Vec<String> {
     values
 }
 
+
+
+
+
+/// Reads a single-line string field from a TOML file.
+/// 
+/// # Arguments
+/// * `path` - Path to the TOML file
+/// * `field_name` - Name of the field to read
+/// 
+/// # Returns
+/// * `Result<String, String>` - The field value or an error message
+pub fn read_single_line_string(path: &str, field_name: &str) -> Result<String, String> {
+    let file = File::open(path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    
+    let reader = io::BufReader::new(file);
+    
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+        let trimmed = line.trim();
+        
+        if trimmed.starts_with(&format!("{} = ", field_name)) {
+            return Ok(trimmed
+                .splitn(2, '=')
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches('"')
+                .to_string());
+        }
+    }
+    
+    Err(format!("Field '{}' not found", field_name))
+}
+
+/// Reads a multi-line string field (triple-quoted) from a TOML file.
+/// 
+/// # Arguments
+/// * `path` - Path to the TOML file
+/// * `field_name` - Name of the field to read
+/// 
+/// # Returns
+/// * `Result<String, String>` - The concatenated multi-line value or an error message
+pub fn read_multi_line_string(path: &str, field_name: &str) -> Result<String, String> {
+    let mut file = File::open(path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    
+    let mut content = String::new();
+    file.read_to_string(&mut content)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+
+    // Find the start of the field
+    let field_start = format!("{} = \"\"\"", field_name);
+    let start_pos = content.find(&field_start)
+        .ok_or_else(|| format!("Multi-line field '{}' not found", field_name))?;
+
+    // Find the end of the field (next """)
+    let content_after_start = &content[start_pos + field_start.len()..];
+    let end_pos = content_after_start.find("\"\"\"")
+        .ok_or_else(|| format!("Closing triple quotes not found for field '{}'", field_name))?;
+
+    // Extract the content between the triple quotes
+    let multi_line_content = &content_after_start[..end_pos];
+
+    // Clean up the content
+    Ok(multi_line_content
+        .lines()
+        .map(|line| line.trim())
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .trim()
+        .to_string())
+}
+
+/// Reads an array of integers from a TOML file into a Vec<u64>.
+/// 
+/// # Arguments
+/// * `path` - Path to the TOML file
+/// * `field_name` - Name of the field to read
+/// 
+/// # Returns
+/// * `Result<Vec<u64>, String>` - The vector of integers or an error message
+pub fn read_integer_array(path: &str, field_name: &str) -> Result<Vec<u64>, String> {
+    let file = File::open(path)
+        .map_err(|e| format!("Failed to open file: {}", e))?;
+    
+    let reader = io::BufReader::new(file);
+    
+    for line in reader.lines() {
+        let line = line.map_err(|e| format!("Failed to read line: {}", e))?;
+        let trimmed = line.trim();
+        
+        if trimmed.starts_with(&format!("{} = [", field_name)) {
+            let array_part = trimmed
+                .splitn(2, '=')
+                .nth(1)
+                .ok_or("Invalid array format")?
+                .trim()
+                .trim_matches(|c| c == '[' || c == ']');
+                
+            return array_part
+                .split(',')
+                .map(|s| s.trim().parse::<u64>()
+                    .map_err(|e| format!("Invalid integer: {}", e)))
+                .collect::<Result<Vec<u64>, String>>();
+        }
+    }
+    
+    Err(format!("Array field '{}' not found", field_name))
+}
+
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use std::fs::write;
     use std::fs::remove_file;
@@ -242,15 +357,75 @@ mod tests {
         let values = read_basename_fields_from_toml("", "prompt");
         assert!(values.is_empty());
     }
+    
+    #[test]
+    fn test_single_line_string() {
+        let test_content = r#"
+            field1 = "value1"
+            field2 = "value2"
+        "#;
+        let test_file = "test_single.toml";
+        write(test_file, test_content).unwrap();
+        
+        let result = read_single_line_string(test_file, "field1");
+        assert_eq!(result.unwrap(), "value1");
+        
+        std::fs::remove_file(test_file).unwrap();
+    }
+    
+
+    #[test]
+    fn test_multi_line_string() {
+        let test_content = r#"
+description = """
+This is a
+multi-line
+string
+"""\
+"#;
+        let test_file = "test_multi.toml";
+        write(test_file, test_content).unwrap();
+        
+        let result = read_multi_line_string(test_file, "description");
+        assert!(result.is_ok());
+        let content = result.unwrap();
+        assert!(content.contains("multi-line"));
+        assert_eq!(content, "This is a\nmulti-line\nstring");
+        
+        std::fs::remove_file(test_file).unwrap();
+    }
+    
+    #[test]
+    fn test_integer_array() {
+        let test_content = r#"
+            numbers = [1, 2, 3, 4, 5]
+        "#;
+        let test_file = "test_array.toml";
+        write(test_file, test_content).unwrap();
+        
+        let result = read_integer_array(test_file, "numbers");
+        assert_eq!(result.unwrap(), vec![1, 2, 3, 4, 5]);
+        
+        std::fs::remove_file(test_file).unwrap();
+    }
 }
 
 
-
-fn main() {
+fn main() -> Result<(), String> {
     let value = read_field_from_toml("test.toml", "fieldname");
     println!("Field value -> {}", value);
     
     // Read all prompt fields
     let prompt_values = read_basename_fields_from_toml("config.toml", "prompt");
     println!("Prompts: {:?}", prompt_values);
+
+    let single_line = read_single_line_string("config.toml", "promptsdir_1")?;
+    let multi_line = read_multi_line_string("config.toml", "multi_line")?;
+    let numbers = read_integer_array("config.toml", "schedule_duration_start_end")?;
+    
+    println!("Single line: {}", single_line);
+    println!("Multi line: {}", multi_line);
+    println!("Numbers: {:?}", numbers);
+    
+    Ok(())
 }
