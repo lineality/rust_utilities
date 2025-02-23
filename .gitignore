@@ -3,12 +3,15 @@
 debug/
 target/
 
+
+
 # uma directories
 project_graph_data/
 archive/
 uma_archive/
 sync_data/
 data_files/
+invites_updates/
 
 # uma files
 uma.toml
