@@ -1,5 +1,5 @@
 [package]
-name = "gpg_tools"
+name = "get_gpg_key_from_id"
 version = "0.1.0"
 edition = "2021"
 
