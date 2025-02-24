@@ -3,8 +3,221 @@
 //! This module provides functionality to clearsign files with your private key
 //! and encrypt them with a recipient's public key file.
 /*
+```markdown
+# GPG File Processing Module Documentation
+`handle_gpg.rs` - Version 1.0
+
+## Overview
+This module provides secure GPG file processing capabilities, specifically handling:
+1. Clearsigning files with a private key
+2. Encrypting clearsigned files for specific recipients
+3. Decrypting and validating received files
+
+## Prerequisites
+- GPG (GnuPG) must be installed and configured on the system
+- Users must have appropriate GPG keys generated/imported:
+  - Sender needs their private key for signing
+  - Sender needs recipient's public key for encryption
+  - Recipient needs their private key for decryption
+  - Recipient needs sender's public key for validation
+
+## Directory Structure
+```
+project_root/
+├── invites_updates/
+│   ├── incoming/     # For received public keys
+│   └── outgoing/     # For encrypted output files
+└── src/
+    └── handle_gpg.rs # This module
+```
+
+## Key Functions
+
+### For Senders
+```rust
+pub fn clearsign_and_encrypt_file_for_recipient(
+    input_file_path: &Path,
+    your_signing_key_id: &str,
+    recipient_public_key_path: &Path,
+) -> Result<(), GpgError>
+```
+- Takes a file, clearsigns it, and encrypts it for a recipient
+- Output: `invites_updates/outgoing/<original_filename>.gpg`
+
+### For Recipients
+```rust
+pub fn decrypt_and_validate_file(
+    encrypted_file_path: &Path,
+    validator_key_id: &str,
+    output_path: &Path,
+) -> Result<(), GpgError>
+```
+- Decrypts received file and validates the clearsign signature
+
+## Error Handling
+All operations return `Result<T, GpgError>` where `GpgError` includes:
+- FileSystemError
+- GpgOperationError
+- TempFileError
+- PathError
+- ValidationError
+- DecryptionError
+
+## Security Features
+1. No unsafe code
+2. Temporary files automatically cleaned up
+3. No unwrap() calls - all errors properly handled
+4. GPG trust model set to "always" for encryption operations
+5. Signature validation enforced
+6. All operations use separate temporary files
+
+## Common GPG Commands for Users
+```bash
+# List secret keys (for signing)
+gpg --list-secret-keys --keyid-format=long
+
+# List public keys (for validation)
+gpg --list-keys --keyid-format=long
+
+# Export public key
+gpg --armor --export KEYID > public_key.asc
+
+# Import public key
+gpg --import public_key.asc
+```
+
+## Usage Examples
+
+### Sending a File
+```rust
+let input_file = Path::new("config.toml");
+let signing_key = "3AA5C34371567BD2";
+let recipient_key = Path::new("invites_updates/incoming/recipient_key.asc");
+
+clearsign_and_encrypt_file_for_recipient(
+    input_file,
+    signing_key,
+    recipient_key
+)?;
+```
+
+### Receiving a File
+```rust
+let encrypted_file = Path::new("invites_updates/outgoing/config.toml.gpg");
+let validator_key = "1234567890ABCDEF";
+let output_file = Path::new("decrypted_config.toml");
+
+decrypt_and_validate_file(
+    encrypted_file,
+    validator_key,
+    output_file
+)?;
+```
+
+## Process Flow
+
+### Sending
+1. Validate signing key exists
+2. Create temporary file paths
+3. Clearsign original file
+4. Encrypt clearsigned file
+5. Clean up temporary files
+6. Output to `invites_updates/outgoing/`
+
+### Receiving
+1. Decrypt received file
+2. Verify clearsign signature
+3. Extract verified content
+4. Clean up temporary files
+5. Output decrypted and verified file
+
+## Maintenance Notes
+- No third-party dependencies
+- All file operations use temporary files
+- Extensive error handling throughout
+- Clear, descriptive variable names
+- Full documentation coverage
+
+## Testing
+Recommended test scenarios:
+1. Valid signing key, valid recipient key
+2. Invalid signing key
+3. Invalid recipient key
+4. File permission issues
+5. Missing directories
+6. Large files
+7. Invalid file paths
+8. Malformed GPG keys
+
+## Future Improvements
+Consider adding:
+1. Async support
+2. Multiple recipient support
+3. Key validation caching
+4. Configurable output directories
+5. Logging integration
+6. Stream processing for large files
+
+## Support
+For questions or issues:
+1. Check GPG key validity
+2. Verify file permissions
+3. Ensure GPG is properly installed
+4. Check error messages in GpgError enum
+5. Verify directory structure exists
+
+## Security Notes
+1. Never share private keys
+2. Regularly backup GPG keys
+3. Use strong passphrases
+4. Keep GPG updated
+5. Monitor file permissions
+6. Verify key fingerprints
+```
+
 e.g.
 
+use std::path::Path;
+use std::io::{self, Write};
+
+mod handle_gpg;  // This declares the module and tells Rust to look for handle_gpg.rs
+use crate::handle_gpg::{
+    GpgError, 
+    clearsign_and_encrypt_file_for_recipient, 
+    decrypt_and_validate_file,
+};  // Import the specific items we need
+
+Main entry point for GPG file decryption and validation.
+
+# Purpose
+Provides an interactive command-line interface for decrypting and validating
+GPG encrypted files that have been clearsigned.
+
+# Process
+1. Prompts for necessary GPG key information
+2. Validates input parameters
+3. Decrypts the specified encrypted file
+4. Verifies the clearsign signature
+5. Outputs the decrypted and verified file
+
+# Arguments
+None - Interactive prompts gather needed information
+
+# Returns
+* `Ok(())` - Operation completed successfully
+* `Err(GpgError)` - Operation failed with specific error details
+
+# Example Usage
+```no_run
+fn main() -> Result<(), GpgError> {
+    /// ... function contents ...
+}
+```
+
+# Notes
+- Requires GPG to be installed and configured
+- Requires appropriate private keys to be available in the GPG keyring
+- Default input file location: invites_updates/outgoing/\*.gpg
 pub fn main() -> Result<(), GpgError> {
     // Specify the default encrypted file path
     let encrypted_file = Path::new("invites_updates/outgoing/test.toml.gpg");
