@@ -1,109 +1,43 @@
 
 // read toml fields with vanilla rust
 /*
-TODO
-add clearsign_read functions
-which assumes there is a multiline gpg key in that file
-so this
-pub fn read_multi_line_string(path: &str, field_name: &str) -> Result<String, String> 
-should work to read that gpg key
 
-possibly using something like this: 
 
-use std::process::{Command, Stdio};
-use std::io::{self, Write};
-use std::path::Path;
+mod read_toml_field;  // This declares the module and tells Rust to look for handle_gpg.rs
+use crate::read_toml_field::{
+    read_field_from_toml,
+    read_basename_fields_from_toml,
+    read_single_line_string,
+    read_multi_line_string, 
+    read_integer_array,
+}; 
 
-use std::process::{Command, Stdio};
-use std::io::{self, Write};
-use std::path::Path;
+fn main() -> Result<(), String> {
+    let value = read_field_from_toml("test.toml", "fieldname");
+    println!("Field value -> {}", value);
+    
+    // Read all prompt fields
+    let prompt_values = read_basename_fields_from_toml("config.toml", "prompt");
+    println!("Prompts: {:?}", prompt_values);
 
-/// Verifies a clearsign file using GPG and returns a boolean indicating success or failure.
-///
-/// # Arguments
-///
-/// * `clearsign_path` - The path to the clearsign file to be verified.
-/// * `key` - The key to be used for verification.
-///
-/// # Returns
-///
-/// * `Result<bool, Box<dyn std::error::Error>>` - Ok(true) if verification is successful, Ok(false) if verification fails, otherwise an error.
-fn verify_clearsign(clearsign_path: &Path, key: &str) -> Result<bool, Box<dyn std::error::Error>> {
-    // Check if the clearsign file exists
-    if !clearsign_path.exists() {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Clearsign file not found",
-        )));
-    }
-
-    // Run the GPG command to verify the clearsign file
-    let output = Command::new("gpg")
-        .arg("--verify")
-        .arg("--key")
-        .arg(key)
-        .arg(clearsign_path)
-        .stderr(Stdio::piped())
-        .output()?;
-
-    // Check if the command was successful
-    if !output.status.success() {
-        // If the command failed, print the stderr output
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        eprintln!("GPG verification failed: {}", stderr);
-        return Ok(false);
-    }
-
-    // If the command was successful, print the stdout output
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    println!("GPG verification successful: {}", stdout);
-
-    Ok(true)
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Path to the clearsign file
-    let clearsign_path = Path::new("path/to/your/clearsign.asc");
-    // Key to be used for verification
-    let key = "your-key-id";
-
-    // Verify the clearsign file and store the result in a boolean variable
-    let verification_result = verify_clearsign(clearsign_path, key)?;
-
-    // Print the verification result
-    if verification_result {
-        println!("Verification passed.");
-    } else {
-        println!("Verification failed.");
-    }
-
+    let single_line = read_single_line_string("config.toml", "promptsdir_1")?;
+    let multi_line = read_multi_line_string("config.toml", "multi_line")?;
+    let integer_array = read_integer_array("config.toml", "schedule_duration_start_end")?;
+    
+    println!("Single line: {}", single_line);
+    println!("Multi line: {}", multi_line);
+    println!("Numbers: {:?}", integer_array);
+    
     Ok(())
 }
 
-
-There should be three new functions:
-
-    let single_line = read_singleline_string_clearsigntoml("config.toml", "promptsdir_1")?;
-    let multi_line = read_multiline_string_clearsigntoml("config.toml", "multi_line")?;
-    let integer_array = read_integerarray_clearsigntoml("config.toml", "schedule_duration_start_end")?;
-
-These functions will add a new first step:
-
-1. use the read_multi_line_string() function to get the gpg key (from the same file that is 
-    being read)
-2. attempt to use maybe 
-
-
-Question: best way to handle errors smoothly.
-e.g. for strings, return error message instead of file text.
-unclear for int array or [0]? 
 
 
 */
 
 use std::fs::File;
 use std::io::{self, BufRead, Read};
-use std::path::Path;
+// use std::path::Path;
 use std::process::Command;
 
 /// The function reads a single line from a TOML file that starts with a specified field name
@@ -435,6 +369,42 @@ fn extract_gpg_key(path: &str, key_field: &str) -> Result<String, String> {
     read_multi_line_string(path, key_field)
 }
 
+// /// Verifies a clearsigned TOML file using GPG.
+// ///
+// /// # Arguments
+// /// * `path` - Path to the TOML file
+// /// * `key` - The GPG key to use for verification
+// ///
+// /// # Returns
+// /// * `Result<(), String>` - Success or error message
+// fn verify_clearsign(path: &str, key: &str) -> Result<(), String> {
+//     // Create a temporary file to hold the key
+//     let temp_key_path = format!("{}.key", path);
+//     std::fs::write(&temp_key_path, key)
+//         .map_err(|e| format!("Failed to write temporary key file: {}", e))?;
+
+//     // Use gpg to verify the file
+//     let output = Command::new("gpg")
+//         .arg("--verify")
+//         .arg("--batch")
+//         .arg("--no-tty")
+//         .arg("--keyring")
+//         .arg(&temp_key_path)
+//         .arg(path)
+//         .output()
+//         .map_err(|e| format!("Failed to execute GPG: {}", e))?;
+
+//     // Clean up the temporary key file
+//     let _ = std::fs::remove_file(temp_key_path);
+
+//     if !output.status.success() {
+//         let stderr = String::from_utf8_lossy(&output.stderr);
+//         return Err(format!("GPG verification failed: {}", stderr));
+//     }
+
+//     Ok(())
+// }
+
 /// Verifies a clearsigned TOML file using GPG.
 ///
 /// # Arguments
@@ -442,8 +412,8 @@ fn extract_gpg_key(path: &str, key_field: &str) -> Result<String, String> {
 /// * `key` - The GPG key to use for verification
 ///
 /// # Returns
-/// * `Result<(), String>` - Success or error message
-fn verify_clearsign(path: &str, key: &str) -> Result<(), String> {
+/// * `Result<bool, String>` - True if verification succeeds, false if it fails, or an error message
+fn verify_clearsign(path: &str, key: &str) -> Result<bool, String> {
     // Create a temporary file to hold the key
     let temp_key_path = format!("{}.key", path);
     std::fs::write(&temp_key_path, key)
@@ -463,12 +433,8 @@ fn verify_clearsign(path: &str, key: &str) -> Result<(), String> {
     // Clean up the temporary key file
     let _ = std::fs::remove_file(temp_key_path);
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("GPG verification failed: {}", stderr));
-    }
-
-    Ok(())
+    // Return the verification result
+    Ok(output.status.success())
 }
 
 /// Reads a single-line string field from a clearsigned TOML file.
@@ -476,18 +442,21 @@ fn verify_clearsign(path: &str, key: &str) -> Result<(), String> {
 /// # Arguments
 /// * `path` - Path to the TOML file
 /// * `field_name` - Name of the field to read
-/// * `key_field` - Optional name of the field containing the GPG key
 ///
 /// # Returns
 /// * `Result<String, String>` - The field value or an error message
 pub fn read_singleline_string_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
-    // Extract GPG key from the file (using a default key field name if not specified)
+    // Extract GPG key from the file
     let key = extract_gpg_key(path, "gpg_key")?;
     
-    // Verify the file
-    verify_clearsign(path, &key)?;
+    // Verify the file and only proceed if verification succeeds
+    let verification_result = verify_clearsign(path, &key)?;
     
-    // Now read the actual field
+    if !verification_result {
+        return Err(format!("GPG verification failed for file: {}", path));
+    }
+    
+    // Only read the field if verification succeeded
     read_single_line_string(path, field_name)
 }
 
@@ -496,18 +465,21 @@ pub fn read_singleline_string_clearsigntoml(path: &str, field_name: &str) -> Res
 /// # Arguments
 /// * `path` - Path to the TOML file
 /// * `field_name` - Name of the field to read
-/// * `key_field` - Optional name of the field containing the GPG key
 ///
 /// # Returns
 /// * `Result<String, String>` - The field value or an error message
 pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
-    // Extract GPG key from the file (using a default key field name if not specified)
+    // Extract GPG key from the file
     let key = extract_gpg_key(path, "gpg_key")?;
     
-    // Verify the file
-    verify_clearsign(path, &key)?;
+    // Verify the file and only proceed if verification succeeds
+    let verification_result = verify_clearsign(path, &key)?;
     
-    // Now read the actual field
+    if !verification_result {
+        return Err(format!("GPG verification failed for file: {}", path));
+    }
+    
+    // Only read the field if verification succeeded
     read_multi_line_string(path, field_name)
 }
 
@@ -516,66 +488,21 @@ pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Resu
 /// # Arguments
 /// * `path` - Path to the TOML file
 /// * `field_name` - Name of the field to read
-/// * `key_field` - Optional name of the field containing the GPG key
 ///
 /// # Returns
 /// * `Result<Vec<u64>, String>` - The integer array or an error message
 pub fn read_integerarray_clearsigntoml(path: &str, field_name: &str) -> Result<Vec<u64>, String> {
-    // Extract GPG key from the file (using a default key field name if not specified)
+    // Extract GPG key from the file
     let key = extract_gpg_key(path, "gpg_key")?;
     
-    // Verify the file
-    verify_clearsign(path, &key)?;
+    // Verify the file and only proceed if verification succeeds
+    let verification_result = verify_clearsign(path, &key)?;
     
-    // Now read the actual field
-    read_integer_array(path, field_name)
-}
-
-/// Advanced implementation with configurable GPG key field
-pub fn read_singleline_string_clearsigntoml_with_key(
-    path: &str, 
-    field_name: &str,
-    key_field: &str
-) -> Result<String, String> {
-    // Extract GPG key from the file using the specified key field
-    let key = extract_gpg_key(path, key_field)?;
+    if !verification_result {
+        return Err(format!("GPG verification failed for file: {}", path));
+    }
     
-    // Verify the file
-    verify_clearsign(path, &key)?;
-    
-    // Now read the actual field
-    read_single_line_string(path, field_name)
-}
-
-/// Advanced implementation with configurable GPG key field
-pub fn read_multiline_string_clearsigntoml_with_key(
-    path: &str, 
-    field_name: &str,
-    key_field: &str
-) -> Result<String, String> {
-    // Extract GPG key from the file using the specified key field
-    let key = extract_gpg_key(path, key_field)?;
-    
-    // Verify the file
-    verify_clearsign(path, &key)?;
-    
-    // Now read the actual field
-    read_multi_line_string(path, field_name)
-}
-
-/// Advanced implementation with configurable GPG key field
-pub fn read_integerarray_clearsigntoml_with_key(
-    path: &str, 
-    field_name: &str,
-    key_field: &str
-) -> Result<Vec<u64>, String> {
-    // Extract GPG key from the file using the specified key field
-    let key = extract_gpg_key(path, key_field)?;
-    
-    // Verify the file
-    verify_clearsign(path, &key)?;
-    
-    // Now read the actual field
+    // Only read the field if verification succeeded
     read_integer_array(path, field_name)
 }
 
