@@ -19,11 +19,11 @@ fn main() -> Result<(), String> {
 
     let single_line = read_single_line_string("config.toml", "promptsdir_1")?;
     let multi_line = read_multi_line_string("config.toml", "multi_line")?;
-    let numbers = read_integer_array("config.toml", "schedule_duration_start_end")?;
+    let integer_array = read_integer_array("config.toml", "schedule_duration_start_end")?;
     
     println!("Single line: {}", single_line);
     println!("Multi line: {}", multi_line);
-    println!("Numbers: {:?}", numbers);
+    println!("Numbers: {:?}", integer_array);
     
     Ok(())
 }
