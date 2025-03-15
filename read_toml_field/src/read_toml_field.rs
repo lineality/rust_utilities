@@ -8,7 +8,7 @@ use crate::read_toml_field::{
     read_field_from_toml,
     read_basename_fields_from_toml,
     read_single_line_string,
-    read_multi_line_string, 
+    read_multi_line_toml_string, 
     read_integer_array,
 }; 
 
@@ -21,7 +21,7 @@ fn main() -> Result<(), String> {
     println!("Prompts: {:?}", prompt_values);
 
     let single_line = read_single_line_string("config.toml", "promptsdir_1")?;
-    let multi_line = read_multi_line_string("config.toml", "multi_line")?;
+    let multi_line = read_multi_line_toml_string("config.toml", "multi_line")?;
     let integer_array = read_integer_array("config.toml", "schedule_duration_start_end")?;
     
     println!("Single line: {}", single_line);
@@ -288,7 +288,7 @@ pub fn read_single_line_string(path: &str, field_name: &str) -> Result<String, S
 /// 
 /// # Returns
 /// * `Result<String, String>` - The concatenated multi-line value or an error message
-pub fn read_multi_line_string(path: &str, field_name: &str) -> Result<String, String> {
+pub fn read_multi_line_toml_string(path: &str, field_name: &str) -> Result<String, String> {
     let mut file = File::open(path)
         .map_err(|e| format!("Failed to open file: {}", e))?;
     
@@ -366,7 +366,7 @@ pub fn read_integer_array(path: &str, field_name: &str) -> Result<Vec<u64>, Stri
 /// # Returns
 /// * `Result<String, String>` - The GPG key or an error message
 fn extract_gpg_key(path: &str, key_field: &str) -> Result<String, String> {
-    read_multi_line_string(path, key_field)
+    read_multi_line_toml_string(path, key_field)
 }
 
 // /// Verifies a clearsigned TOML file using GPG.
@@ -480,7 +480,7 @@ pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Resu
     }
     
     // Only read the field if verification succeeded
-    read_multi_line_string(path, field_name)
+    read_multi_line_toml_string(path, field_name)
 }
 
 /// Reads an integer array field from a clearsigned TOML file.
@@ -611,7 +611,7 @@ string
         let test_file = "test_multi.toml";
         write(test_file, test_content).unwrap();
         
-        let result = read_multi_line_string(test_file, "description");
+        let result = read_multi_line_toml_string(test_file, "description");
         assert!(result.is_ok());
         let content = result.unwrap();
         assert!(content.contains("multi-line"));
