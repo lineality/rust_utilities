@@ -175,8 +175,9 @@ For questions or issues:
 6. Verify key fingerprints
 ```
 
-e.g.
+# Module Use Example:
 
+```rust
 use std::path::Path;
 use std::io::{self, Write};
 
@@ -185,86 +186,17 @@ use crate::handle_gpg::{
     GpgError, 
     clearsign_and_encrypt_file_for_recipient, 
     decrypt_and_validate_file,
-};  // Import the specific items we need
+    rust_gpg_tools_interface,
+};
 
-Main entry point for GPG file decryption and validation.
-
-# Purpose
-Provides an interactive command-line interface for decrypting and validating
-GPG encrypted files that have been clearsigned.
-
-# Process
-1. Prompts for necessary GPG key information
-2. Validates input parameters
-3. Decrypts the specified encrypted file
-4. Verifies the clearsign signature
-5. Outputs the decrypted and verified file
-
-# Arguments
-None - Interactive prompts gather needed information
-
-# Returns
-* `Ok(())` - Operation completed successfully
-* `Err(GpgError)` - Operation failed with specific error details
-
-# Example Usage
-```no_run
-fn main() -> Result<(), GpgError> {
-    /// ... function contents ...
+// call module
+pub fn main() -> Result<(), GpgError> {
+    rust_gpg_tools_interface();
 }
 ```
-
-# Notes
-- Requires GPG to be installed and configured
-- Requires appropriate private keys to be available in the GPG keyring
-- Default input file location: invites_updates/outgoing/\*.gpg
-pub fn main() -> Result<(), GpgError> {
-    // Specify the default encrypted file path
-    let encrypted_file = Path::new("invites_updates/outgoing/test.toml.gpg");
-    
-    // Specify where the decrypted and verified file will be saved
-    let output_file = Path::new("decrypted_and_verified.toml");
-
-    // Display helpful information about finding GPG key IDs
-    println!("\nTo get the validator's key ID, run: $ gpg --list-keys --keyid-format=long");
-    print!("Enter validator's GPG key ID: ");
-    io::stdout().flush()
-        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
-    
-    // Get the validator's key ID from user input
-    let mut validator_key_id = String::new();
-    io::stdin()
-        .read_line(&mut validator_key_id)
-        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
-    let validator_key_id = validator_key_id.trim();
-
-    // Validate that a key ID was provided
-    if validator_key_id.is_empty() {
-        return Err(GpgError::ValidationError(
-            "No validator key ID provided".to_string()
-        ));
-    }
-
-    // Display the parameters that will be used
-    println!("\nProcessing with the following parameters:");
-    println!("Encrypted file path: {}", encrypted_file.display());
-    println!("Validator key ID: {}", validator_key_id);
-    println!("Output file path: {}", output_file.display());
-
-    // Perform the decryption and validation
-    // for testing treat the senders key-id as the recipents
-    decrypt_and_validate_file(encrypted_file, &validator_key_id, output_file)?;
-    
-    // Confirm successful completion
-    println!("\nSuccess: File has been decrypted and signature verified!");
-    println!("Decrypted file location: {}", output_file.display());
-    
-    Ok(())
-}
-
 */
 
-
+use std::io::{self, Write};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -285,6 +217,61 @@ impl GpgError {
     }
 }
 
+
+/// Clearsigns a file with the user's private key and saves the output to a specified location.
+///
+/// # Arguments
+/// * `input_file_path` - Path to the file that needs to be clearsigned
+/// * `output_file_path` - Path where the clearsigned file will be saved
+/// * `signing_key_id` - GPG key ID to use for signing
+///
+/// # Returns
+/// * `Ok(())` if clearsigning succeeds
+/// * `Err(GpgError)` if any operation fails
+///
+/// # Example
+/// ```no_run
+/// let input = Path::new("document.txt");
+/// let output = Path::new("document.txt.asc");
+/// let key_id = "3AA5C34371567BD2";
+/// clearsign_file(input, output, key_id)?;
+/// ```
+pub fn clearsign_file(
+    input_file_path: &Path,
+    output_file_path: &Path,
+    signing_key_id: &str,
+) -> Result<(), GpgError> {
+    // Validate that the signing key exists and is available
+    if !validate_gpg_key(signing_key_id)? {
+        return Err(GpgError::GpgOperationError(
+            format!("Signing key '{}' not found in keyring", signing_key_id)
+        ));
+    }
+    
+    // Ensure the output directory exists
+    if let Some(parent) = output_file_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| GpgError::FileSystemError(e))?;
+    }
+    
+    // Directly clearsign the file to the specified output path
+    let clearsign_output = Command::new("gpg")
+        .arg("--clearsign")
+        .arg("--default-key")
+        .arg(signing_key_id)
+        .arg("--output")
+        .arg(output_file_path)
+        .arg(input_file_path)
+        .output()
+        .map_err(|e| GpgError::GpgOperationError(e.to_string()))?;
+
+    if !clearsign_output.status.success() {
+        let error_message = String::from_utf8_lossy(&clearsign_output.stderr);
+        return Err(GpgError::GpgOperationError(error_message.to_string()));
+    }
+
+    Ok(())
+}
 
 /// Decrypts and validates a clearsigned, encrypted file
 /// 
@@ -322,8 +309,20 @@ pub fn decrypt_and_validate_file(
     Ok(())
 }
 
-/// Decrypts a GPG encrypted file
-fn decrypt_gpg_file(
+/// Decrypts a GPG encrypted file.
+///
+/// # Arguments
+/// * `encrypted_file_path` - Path to the encrypted GPG file
+/// * `output_path` - Path where the decrypted output will be saved
+///
+/// # Returns
+/// * `Ok(())` - If decryption succeeds
+/// * `Err(GpgError)` - If any operation fails
+///
+/// # Notes
+/// This function requires that the user has the appropriate private key
+/// in their GPG keyring to decrypt the file.
+pub fn decrypt_gpg_file(
     encrypted_file_path: &Path,
     output_path: &Path,
 ) -> Result<(), GpgError> {
@@ -343,7 +342,19 @@ fn decrypt_gpg_file(
     Ok(())
 }
 
-/// Verifies a clearsigned file's signature
+/// Verifies a clearsigned file's signature.
+///
+/// # Arguments
+/// * `clearsigned_file_path` - Path to the clearsigned file
+/// * `validator_key_id` - GPG key ID to use for validation
+///
+/// # Returns
+/// * `Ok(())` - If signature validation succeeds
+/// * `Err(GpgError)` - If validation fails or any other operation fails
+///
+/// # Notes
+/// This function first checks if the validator key exists in the keyring
+/// before attempting to verify the signature.
 fn verify_clearsign_signature(
     clearsigned_file_path: &Path,
     validator_key_id: &str,
@@ -369,7 +380,19 @@ fn verify_clearsign_signature(
     Ok(())
 }
 
-/// Extracts the original content from a verified clearsigned file
+/// Extracts the original content from a verified clearsigned file.
+///
+/// # Arguments
+/// * `clearsigned_file_path` - Path to the verified clearsigned file
+/// * `output_path` - Path where the extracted content will be saved
+///
+/// # Returns
+/// * `Ok(())` - If content extraction succeeds
+/// * `Err(GpgError)` - If any operation fails
+///
+/// # Notes
+/// This function parses the clearsigned file to extract only the content
+/// between the PGP header and signature sections
 fn extract_verified_content(
     clearsigned_file_path: &Path,
     output_path: &Path,
@@ -401,7 +424,24 @@ fn extract_verified_content(
     Ok(())
 }
 
-/// Validates that a GPG key ID exists in the keyring
+/// Validates that a GPG key ID exists in the keyring.
+///
+/// # Arguments
+/// * `key_id` - The GPG key ID to check for existence
+///
+/// # Returns
+/// * `Ok(bool)` - True if the key exists, false otherwise
+/// * `Err(GpgError)` - If there was an error executing the GPG command
+///
+/// # Example
+/// ```no_run
+/// let key_exists = validate_gpg_key("3AA5C34371567BD2")?;
+/// if key_exists {
+///     println!("Key found in keyring");
+/// } else {
+///     println!("Key not found in keyring");
+/// }
+/// ```
 pub fn validate_gpg_key(key_id: &str) -> Result<bool, GpgError> {
     let validation_output = Command::new("gpg")
         .arg("--list-keys")
@@ -429,7 +469,14 @@ pub enum GpgError {
     DecryptionError(String),
 }
 
-/// Generate a current Unix timestamp for unique file naming
+/// Generates a current Unix timestamp for unique file naming.
+///
+/// # Returns
+/// * `u64` - Current Unix timestamp in seconds
+///
+/// # Notes
+/// This function is used internally to create unique filenames
+/// for temporary files used during GPG operations.
 fn generate_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -437,7 +484,18 @@ fn generate_timestamp() -> u64 {
         .as_secs()
 }
 
-/// Creates a temporary file path with a unique name
+/// Creates a temporary file path with a unique name.
+///
+/// # Arguments
+/// * `original_filename` - Base name to use for the temporary file
+///
+/// # Returns
+/// * `Ok(PathBuf)` - Path to the new temporary file
+/// * `Err(GpgError)` - If there was an error creating the path
+///
+/// # Notes
+/// This function does not create the actual file, only generates
+/// a unique path for it in the system's temporary directory.
 fn create_temp_file_path(original_filename: &str) -> Result<PathBuf, GpgError> {
     let mut temp_dir = std::env::temp_dir();
     let timestamp = generate_timestamp();
@@ -446,7 +504,20 @@ fn create_temp_file_path(original_filename: &str) -> Result<PathBuf, GpgError> {
     Ok(temp_dir)
 }
 
-/// Clearsigns a file using your GPG private key
+/// Clearsigns a file using your GPG private key.
+///
+/// # Arguments
+/// * `input_file_path` - Path to the file to be clearsigned
+/// * `temp_file_path` - Path where the clearsigned output will be saved
+/// * `your_key_id` - Your private key ID for signing
+///
+/// # Returns
+/// * `Ok(())` - If clearsigning succeeds
+/// * `Err(GpgError)` - If any operation fails
+///
+/// # Notes
+/// This is an internal function used by higher-level functions
+/// like `clearsign_and_encrypt_file_for_recipient`.
 fn clearsign_file_with_private_key(
     input_file_path: &Path,
     temp_file_path: &Path,
@@ -470,7 +541,21 @@ fn clearsign_file_with_private_key(
     Ok(())
 }
 
-/// Encrypts a file using a recipient's public key file
+/// Encrypts a file using a recipient's public key file.
+///
+/// # Arguments
+/// * `input_file_path` - Path to the file to be encrypted
+/// * `output_file_path` - Path where the encrypted output will be saved
+/// * `recipient_public_key_path` - Path to the recipient's public key file
+///
+/// # Returns
+/// * `Ok(())` - If encryption succeeds
+/// * `Err(GpgError)` - If any operation fails
+///
+/// # Notes
+/// This function uses GnuPG's "always" trust model to allow
+/// encrypting for recipients whose keys might not be fully trusted
+/// in the local GPG keyring.
 fn encrypt_file_with_public_key(
     input_file_path: &Path,
     output_file_path: &Path,
@@ -516,7 +601,7 @@ pub fn clearsign_and_encrypt_file_for_recipient(
         .and_then(|n| n.to_str())
         .ok_or_else(|| GpgError::PathError("Invalid input file name".to_string()))?;
 
-    let clearsigned_temp_path = create_temp_file_path(&format!("clearsigned_{}", original_filename))?;
+    let clearsigned_temp_path = create_temp_file_path(&format!("invites_updates/clearsigned_{}", original_filename))?;
     
     let mut final_output_path = PathBuf::from("invites_updates/outgoing");
     fs::create_dir_all(&final_output_path)
@@ -537,3 +622,325 @@ pub fn clearsign_and_encrypt_file_for_recipient(
 
     Ok(())
 }
+
+/// Interactive workflow for decrypting and validating files.
+///
+/// # Purpose
+/// Guides the user through providing necessary information to decrypt
+/// and validate a clearsigned, encrypted GPG file.
+///
+/// # Process
+/// 1. Prompts for validator's GPG key ID
+/// 2. Validates input parameters
+/// 3. Decrypts and validates the file
+/// 4. Reports results to the user
+///
+/// # Returns
+/// * `Ok(())` - If the workflow completes successfully
+/// * `Err(GpgError)` - If any step fails
+///
+/// # Notes
+/// Uses default file paths for input and output if not specified.
+fn decrypt_and_validate_workflow() -> Result<(), GpgError> {
+    // Specify the default encrypted file path
+    let encrypted_file = Path::new("invites_updates/outgoing/test.toml.gpg");
+    
+    // Specify where the decrypted and verified file will be saved
+    let output_file = Path::new("invites_updates/decrypted_and_verified.toml");
+
+    // Display helpful information about finding GPG key IDs
+    println!("\nTo get the validator's key ID, run: $ gpg --list-keys --keyid-format=long");
+    print!("Enter validator's GPG key ID: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    // Get the validator's key ID from user input
+    let mut validator_key_id = String::new();
+    io::stdin()
+        .read_line(&mut validator_key_id)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let validator_key_id = validator_key_id.trim();
+
+    // Validate that a key ID was provided
+    if validator_key_id.is_empty() {
+        return Err(GpgError::ValidationError(
+            "No validator key ID provided".to_string()
+        ));
+    }
+
+    // Display the parameters that will be used
+    println!("\nProcessing with the following parameters:");
+    println!("Encrypted file path: {}", encrypted_file.display());
+    println!("Validator key ID: {}", validator_key_id);
+    println!("Output file path: {}", output_file.display());
+
+    // Perform the decryption and validation
+    decrypt_and_validate_file(encrypted_file, &validator_key_id, output_file)?;
+    
+    // Confirm successful completion
+    println!("\nSuccess: File has been decrypted and signature verified!");
+    println!("Decrypted file location: {}", output_file.display());
+    
+    Ok(())
+}
+
+/// Interactive workflow for clearsigning files.
+///
+/// # Purpose
+/// Guides the user through providing necessary information to clearsign
+/// a file with their GPG private key.
+///
+/// # Process
+/// 1. Prompts for file path to clearsign
+/// 2. Prompts for output file path (with default option)
+/// 3. Prompts for signing key ID
+/// 4. Validates all inputs
+/// 5. Performs the clearsigning operation
+/// 6. Reports results to the user
+///
+/// # Returns
+/// * `Ok(())` - If the workflow completes successfully
+/// * `Err(GpgError)` - If any step fails
+fn clearsign_workflow() -> Result<(), GpgError> {
+    // Get input file path from user
+    print!("Enter the path to the file you want to clearsign: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut input_file_path_str = String::new();
+    io::stdin()
+        .read_line(&mut input_file_path_str)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let input_file_path = Path::new(input_file_path_str.trim());
+    
+    // Validate input file exists
+    if !input_file_path.exists() {
+        return Err(GpgError::FileSystemError(
+            std::io::Error::new(std::io::ErrorKind::NotFound, "Input file not found")
+        ));
+    }
+    
+    // Get output file path (use default if empty)
+    print!("Enter the output file path (or press Enter for default): ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut output_file_path_str = String::new();
+    io::stdin()
+        .read_line(&mut output_file_path_str)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    
+    let output_file_path = if output_file_path_str.trim().is_empty() {
+        // Create default output file path with .asc extension
+        let input_filename = input_file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| GpgError::PathError("Invalid input file name".to_string()))?;
+            
+        let mut output_path = PathBuf::from("clearsigned");
+        fs::create_dir_all(&output_path)
+            .map_err(|e| GpgError::FileSystemError(e))?;
+        output_path.push(format!("{}.asc", input_filename));
+        output_path
+    } else {
+        PathBuf::from(output_file_path_str.trim())
+    };
+    
+    // Get signing key ID
+    println!("\nTo get your signing key ID, run: $ gpg --list-secret-keys --keyid-format=long");
+    print!("Enter your GPG signing key ID: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut signing_key_id = String::new();
+    io::stdin()
+        .read_line(&mut signing_key_id)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let signing_key_id = signing_key_id.trim();
+    
+    // Validate that a key ID was provided
+    if signing_key_id.is_empty() {
+        return Err(GpgError::ValidationError(
+            "No signing key ID provided".to_string()
+        ));
+    }
+    
+    // Display the parameters that will be used
+    println!("\nProcessing with the following parameters:");
+    println!("Input file path: {}", input_file_path.display());
+    println!("Output file path: {}", output_file_path.display());
+    println!("Signing key ID: {}", signing_key_id);
+    
+    // Perform the clearsigning
+    clearsign_file(input_file_path, &output_file_path, &signing_key_id)?;
+    
+    // Confirm successful completion
+    println!("\nSuccess: File has been clearsigned!");
+    println!("Clearsigned file location: {}", output_file_path.display());
+    
+    Ok(())
+}
+
+/// Interactive workflow for clearsigning and encrypting files.
+///
+/// # Purpose
+/// Guides the user through providing necessary information to clearsign
+/// a file with their GPG private key and encrypt it for a recipient.
+///
+/// # Process
+/// 1. Prompts for file path to process
+/// 2. Prompts for signing key ID
+/// 3. Prompts for recipient's public key file path
+/// 4. Validates all inputs
+/// 5. Performs clearsigning and encryption
+/// 6. Reports results to the user
+///
+/// # Returns
+/// * `Ok(())` - If the workflow completes successfully
+/// * `Err(GpgError)` - If any step fails
+///
+/// # Notes
+/// Output is saved to invites_updates/outgoing/ directory.
+fn clearsign_and_encrypt_workflow() -> Result<(), GpgError> {
+    // Get input file path from user
+    print!("Enter the path to the file you want to clearsign and encrypt: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut input_file_path_str = String::new();
+    io::stdin()
+        .read_line(&mut input_file_path_str)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let input_file_path = Path::new(input_file_path_str.trim());
+    
+    // Validate input file exists
+    if !input_file_path.exists() {
+        return Err(GpgError::FileSystemError(
+            std::io::Error::new(std::io::ErrorKind::NotFound, "Input file not found")
+        ));
+    }
+    
+    // Get signing key ID
+    println!("\nTo get your signing key ID, run: $ gpg --list-secret-keys --keyid-format=long");
+    print!("Enter your GPG signing key ID: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut signing_key_id = String::new();
+    io::stdin()
+        .read_line(&mut signing_key_id)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let signing_key_id = signing_key_id.trim();
+    
+    // Validate that a key ID was provided
+    if signing_key_id.is_empty() {
+        return Err(GpgError::ValidationError(
+            "No signing key ID provided".to_string()
+        ));
+    }
+    
+    // Get recipient's public key path
+    print!("Enter path to recipient's public key file: ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut recipient_key_path_str = String::new();
+    io::stdin()
+        .read_line(&mut recipient_key_path_str)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    let recipient_key_path = Path::new(recipient_key_path_str.trim());
+    
+    // Validate recipient key exists
+    if !recipient_key_path.exists() {
+        return Err(GpgError::FileSystemError(
+            std::io::Error::new(std::io::ErrorKind::NotFound, "Recipient key file not found")
+        ));
+    }
+    
+    // Display the parameters that will be used
+    println!("\nProcessing with the following parameters:");
+    println!("Input file path: {}", input_file_path.display());
+    println!("Signing key ID: {}", signing_key_id);
+    println!("Recipient public key path: {}", recipient_key_path.display());
+    println!("Output will be saved to: invites_updates/outgoing/");
+    
+    // Perform the clearsigning and encryption
+    clearsign_and_encrypt_file_for_recipient(
+        input_file_path,
+        &signing_key_id,
+        recipient_key_path
+    )?;
+    
+    // Calculate the output path for display
+    let original_filename = input_file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| GpgError::PathError("Invalid input file name".to_string()))?;
+    
+    let output_path = PathBuf::from(format!("invites_updates/outgoing/{}.gpg", original_filename));
+    
+    // Confirm successful completion
+    println!("\nSuccess: File has been clearsigned and encrypted!");
+    println!("Encrypted file location: {}", output_path.display());
+    
+    Ok(())
+}
+
+/// Main entry point for GPG file decryption and validation.
+/// 
+/// # Purpose
+/// Provides an interactive command-line interface for decrypting and validating
+/// GPG encrypted files that have been clearsigned.
+/// 
+/// # Process
+/// 1. Prompts for necessary GPG key information
+/// 2. Validates input parameters
+/// 3. Decrypts the specified encrypted file
+/// 4. Verifies the clearsign signature
+/// 5. Outputs the decrypted and verified file
+/// 
+/// # Arguments
+/// None - Interactive prompts gather needed information
+/// 
+/// # Returns
+/// * `Ok(())` - Operation completed successfully
+/// * `Err(GpgError)` - Operation failed with specific error details
+/// 
+/// # Example Usage
+/// ```no_run
+/// fn main() -> Result<(), GpgError> {
+///     // ... function contents ...
+/// }
+/// ```
+/// 
+/// # Notes
+/// - Requires GPG to be installed and configured
+/// - Requires appropriate private keys to be available in the GPG keyring
+/// - Default input file location: invites_updates/outgoing/*.gpg
+pub fn rust_gpg_tools_interface() -> Result<(), GpgError> {
+    // Ask user which operation they want to perform
+    println!("GPG File Processing Utility");
+    println!("---------------------------");
+    println!("1. Decrypt and validate an encrypted file");
+    println!("2. Clearsign a file");
+    println!("3. Clearsign and encrypt a file for a recipient");
+    
+    print!("\nSelect an operation (1-3): ");
+    io::stdout().flush()
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to flush stdout: {}", e)))?;
+    
+    let mut operation = String::new();
+    io::stdin()
+        .read_line(&mut operation)
+        .map_err(|e| GpgError::GpgOperationError(format!("Failed to read input: {}", e)))?;
+    
+    match operation.trim() {
+        "1" => decrypt_and_validate_workflow()?,
+        "2" => clearsign_workflow()?,
+        "3" => clearsign_and_encrypt_workflow()?,
+        _ => return Err(GpgError::ValidationError("Invalid selection".to_string())),
+    }
+    
+    Ok(())
+}
+
