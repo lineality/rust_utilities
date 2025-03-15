@@ -3,13 +3,16 @@
 /*
 
 
+
 mod read_toml_field;  // This declares the module and tells Rust to look for handle_gpg.rs
 use crate::read_toml_field::{
     read_field_from_toml,
     read_basename_fields_from_toml,
-    read_single_line_string,
-    read_multi_line_toml_string, 
+    read_single_line_string_field_from_toml,
+    read_multi_line_toml_string,
     read_integer_array,
+    read_singleline_string_from_clearsigntoml,
+    read_multiline_string_from_clearsigntoml,
 }; 
 
 fn main() -> Result<(), String> {
@@ -20,7 +23,7 @@ fn main() -> Result<(), String> {
     let prompt_values = read_basename_fields_from_toml("config.toml", "prompt");
     println!("Prompts: {:?}", prompt_values);
 
-    let single_line = read_single_line_string("config.toml", "promptsdir_1")?;
+    let single_line = read_single_line_string_field_from_toml("config.toml", "promptsdir_1")?;
     let multi_line = read_multi_line_toml_string("config.toml", "multi_line")?;
     let integer_array = read_integer_array("config.toml", "schedule_duration_start_end")?;
     
@@ -30,8 +33,6 @@ fn main() -> Result<(), String> {
     
     Ok(())
 }
-
-
 
 */
 
@@ -256,7 +257,7 @@ pub fn read_basename_fields_from_toml(path: &str, base_name: &str) -> Vec<String
 /// 
 /// # Returns
 /// * `Result<String, String>` - The field value or an error message
-pub fn read_single_line_string(path: &str, field_name: &str) -> Result<String, String> {
+pub fn read_single_line_string_field_from_toml(path: &str, field_name: &str) -> Result<String, String> {
     let file = File::open(path)
         .map_err(|e| format!("Failed to open file: {}", e))?;
     
@@ -457,7 +458,7 @@ pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgk
     }
 
     // Only read the field if verification succeeded
-    read_single_line_string(path_to_clearsigntoml_with_gpgkey, field_name)
+    read_single_line_string_field_from_toml(path_to_clearsigntoml_with_gpgkey, field_name)
 }
 
 /// Reads a multi-line string field from a clearsigned TOML file.
@@ -468,7 +469,7 @@ pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgk
 ///
 /// # Returns
 /// * `Result<String, String>` - The field value or an error message
-pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
+pub fn read_multiline_string_from_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
     // Extract GPG key from the file
     let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key")?;
     
@@ -549,7 +550,7 @@ mod tests {
         // These tests will fail in real environments since we're using a fake GPG key
         // but they demonstrate the API usage
         let _ = read_singleline_string_from_clearsigntoml(test_file, "promptsdir_1");
-        let _ = read_multiline_string_clearsigntoml(test_file, "multi_line");
+        let _ = read_multiline_string_from_clearsigntoml(test_file, "multi_line");
         let _ = read_integerarray_clearsigntoml(test_file, "schedule_duration_start_end");
 
         std::fs::remove_file(test_file).unwrap();
@@ -592,7 +593,7 @@ mod tests {
         let test_file = "test_single.toml";
         write(test_file, test_content).unwrap();
         
-        let result = read_single_line_string(test_file, "field1");
+        let result = read_single_line_string_field_from_toml(test_file, "field1");
         assert_eq!(result.unwrap(), "value1");
         
         std::fs::remove_file(test_file).unwrap();
