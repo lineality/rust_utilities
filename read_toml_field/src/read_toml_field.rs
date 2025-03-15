@@ -365,7 +365,7 @@ pub fn read_integer_array(path: &str, field_name: &str) -> Result<Vec<u64>, Stri
 ///
 /// # Returns
 /// * `Result<String, String>` - The GPG key or an error message
-fn extract_gpg_key(path: &str, key_field: &str) -> Result<String, String> {
+fn extract_gpg_key_from_clearsigntoml(path: &str, key_field: &str) -> Result<String, String> {
     read_multi_line_toml_string(path, key_field)
 }
 
@@ -445,19 +445,19 @@ fn verify_clearsign(path: &str, key: &str) -> Result<bool, String> {
 ///
 /// # Returns
 /// * `Result<String, String>` - The field value or an error message
-pub fn read_singleline_string_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
+pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgkey: &str, field_name: &str) -> Result<String, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key(path, "gpg_key")?;
-    
+    let key = extract_gpg_key_from_clearsigntoml(path_to_clearsigntoml_with_gpgkey, "gpg_key")?;
+
     // Verify the file and only proceed if verification succeeds
-    let verification_result = verify_clearsign(path, &key)?;
-    
+    let verification_result = verify_clearsign(path_to_clearsigntoml_with_gpgkey, &key)?;
+
     if !verification_result {
-        return Err(format!("GPG verification failed for file: {}", path));
+        return Err(format!("GPG verification failed for file: {}", path_to_clearsigntoml_with_gpgkey));
     }
-    
+
     // Only read the field if verification succeeded
-    read_single_line_string(path, field_name)
+    read_single_line_string(path_to_clearsigntoml_with_gpgkey, field_name)
 }
 
 /// Reads a multi-line string field from a clearsigned TOML file.
@@ -470,7 +470,7 @@ pub fn read_singleline_string_clearsigntoml(path: &str, field_name: &str) -> Res
 /// * `Result<String, String>` - The field value or an error message
 pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key(path, "gpg_key")?;
+    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key")?;
     
     // Verify the file and only proceed if verification succeeds
     let verification_result = verify_clearsign(path, &key)?;
@@ -493,7 +493,7 @@ pub fn read_multiline_string_clearsigntoml(path: &str, field_name: &str) -> Resu
 /// * `Result<Vec<u64>, String>` - The integer array or an error message
 pub fn read_integerarray_clearsigntoml(path: &str, field_name: &str) -> Result<Vec<u64>, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key(path, "gpg_key")?;
+    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key")?;
     
     // Verify the file and only proceed if verification succeeds
     let verification_result = verify_clearsign(path, &key)?;
@@ -548,7 +548,7 @@ mod tests {
 
         // These tests will fail in real environments since we're using a fake GPG key
         // but they demonstrate the API usage
-        let _ = read_singleline_string_clearsigntoml(test_file, "promptsdir_1");
+        let _ = read_singleline_string_from_clearsigntoml(test_file, "promptsdir_1");
         let _ = read_multiline_string_clearsigntoml(test_file, "multi_line");
         let _ = read_integerarray_clearsigntoml(test_file, "schedule_duration_start_end");
 
