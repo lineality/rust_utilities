@@ -12,6 +12,7 @@ uma_archive/
 sync_data/
 data_files/
 invites_updates/
+tests/
 
 # uma files
 uma.toml
