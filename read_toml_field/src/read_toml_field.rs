@@ -448,7 +448,7 @@ fn verify_clearsign(path: &str, key: &str) -> Result<bool, String> {
 /// * `Result<String, String>` - The field value or an error message
 pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgkey: &str, field_name: &str) -> Result<String, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key_from_clearsigntoml(path_to_clearsigntoml_with_gpgkey, "gpg_key")?;
+    let key = extract_gpg_key_from_clearsigntoml(path_to_clearsigntoml_with_gpgkey, "gpg_key_public")?;
 
     // Verify the file and only proceed if verification succeeds
     let verification_result = verify_clearsign(path_to_clearsigntoml_with_gpgkey, &key)?;
@@ -471,7 +471,7 @@ pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgk
 /// * `Result<String, String>` - The field value or an error message
 pub fn read_multiline_string_from_clearsigntoml(path: &str, field_name: &str) -> Result<String, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key")?;
+    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key_public")?;
     
     // Verify the file and only proceed if verification succeeds
     let verification_result = verify_clearsign(path, &key)?;
@@ -494,7 +494,7 @@ pub fn read_multiline_string_from_clearsigntoml(path: &str, field_name: &str) ->
 /// * `Result<Vec<u64>, String>` - The integer array or an error message
 pub fn read_integerarray_clearsigntoml(path: &str, field_name: &str) -> Result<Vec<u64>, String> {
     // Extract GPG key from the file
-    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key")?;
+    let key = extract_gpg_key_from_clearsigntoml(path, "gpg_key_public")?;
     
     // Verify the file and only proceed if verification succeeds
     let verification_result = verify_clearsign(path, &key)?;
@@ -527,7 +527,7 @@ mod tests {
 
         // Create a mock TOML file with a fake GPG key for testing
         let test_content = r#"
-            gpg_key = """
+            gpg_key_public = """
             -----BEGIN PGP PUBLIC KEY BLOCK-----
             mQENBF0blBUBCADPhh9ZoC2QXlA8Xu0ghtQTf5VQgC8CmxPM/H85q8HyITWJ6S+c
             LCG9OSvqpqxN9VTRLVqf9051Rj4nQzGEEzqUJp3zHfLKZN3SNKVnMn8CyeMoWJGg
