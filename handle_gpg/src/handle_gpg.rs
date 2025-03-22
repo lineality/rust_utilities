@@ -487,20 +487,27 @@ fn generate_timestamp() -> u64 {
 /// Creates a temporary file path with a unique name.
 ///
 /// # Arguments
-/// * `original_filename` - Base name to use for the temporary file
+/// * `prefix` - Prefix to use for the temporary file name
 ///
 /// # Returns
 /// * `Ok(PathBuf)` - Path to the new temporary file
 /// * `Err(GpgError)` - If there was an error creating the path
 ///
 /// # Notes
-/// This function does not create the actual file, only generates
-/// a unique path for it in the system's temporary directory.
-fn create_temp_file_path(original_filename: &str) -> Result<PathBuf, GpgError> {
+/// This function creates the parent directory if it doesn't exist
+/// and returns an absolute path to the temporary file.
+fn create_temp_file_path(prefix: &str) -> Result<PathBuf, GpgError> {
     let mut temp_dir = std::env::temp_dir();
     let timestamp = generate_timestamp();
-    let temp_filename = format!("gpg_temp_{}_{}", timestamp, original_filename);
+    let temp_filename = format!("gpg_temp_{}_{}", timestamp, prefix);
     temp_dir.push(temp_filename);
+    
+    // Ensure the parent directory exists
+    if let Some(parent) = temp_dir.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| GpgError::TempFileError(format!("Failed to create temp directory: {}", e)))?;
+    }
+    
     Ok(temp_dir)
 }
 
@@ -594,23 +601,36 @@ pub fn clearsign_and_encrypt_file_for_recipient(
             format!("Signing key '{}' not found in keyring", your_signing_key_id)
         ));
     }
-    
+
     // Create paths for temporary and final files
     let original_filename = input_file_path
         .file_name()
         .and_then(|n| n.to_str())
         .ok_or_else(|| GpgError::PathError("Invalid input file name".to_string()))?;
-
-    let clearsigned_temp_path = create_temp_file_path(&format!("invites_updates/clearsigned_{}", original_filename))?;
     
-    let mut final_output_path = PathBuf::from("invites_updates/outgoing");
-    fs::create_dir_all(&final_output_path)
+    // Create a simple temp file name without directory paths embedded in it
+    let clearsigned_temp_path = create_temp_file_path(&format!("clearsigned_{}", original_filename))?;
+    
+    // Create absolute path for the output directory relative to executable
+    let relative_output_dir = "invites_updates/outgoing";
+    let absolute_output_dir = gpg_make_input_path_name_abs_executabledirectoryrelative_nocheck(relative_output_dir)
+        .map_err(|e| GpgError::PathError(format!("Failed to resolve output directory path: {}", e)))?;
+    
+    // Ensure the output directory exists
+    fs::create_dir_all(&absolute_output_dir)
         .map_err(|e| GpgError::FileSystemError(e))?;
-    final_output_path.push(format!("{}.gpg", original_filename));
-
+    
+    // Create the final output path
+    let final_output_path = absolute_output_dir.join(format!("{}.gpg", original_filename));
+    
+    // Log the paths being used
+    println!("Input file: {}", input_file_path.display());
+    println!("Temporary clearsigned file: {}", clearsigned_temp_path.display());
+    println!("Final output path: {}", final_output_path.display());
+    
     // Clearsign with your private key
     clearsign_file_with_private_key(input_file_path, &clearsigned_temp_path, your_signing_key_id)?;
-
+    
     // Encrypt with recipient's public key
     encrypt_file_with_public_key(&clearsigned_temp_path, &final_output_path, recipient_public_key_path)?;
 
@@ -620,6 +640,10 @@ pub fn clearsign_and_encrypt_file_for_recipient(
             .map_err(|e| GpgError::TempFileError(e.to_string()))?;
     }
 
+    // Log completion
+    println!("\nSuccessfully completed clearsigning and encryption");
+    println!("Output file: {}", final_output_path.display());
+    
     Ok(())
 }
 
@@ -942,5 +966,100 @@ pub fn rust_gpg_tools_interface() -> Result<(), GpgError> {
     }
     
     Ok(())
+}
+
+// helpers
+
+
+/// Gets the directory where the current executable is located.
+///
+/// # Returns
+///
+/// * `Result<PathBuf, io::Error>` - The absolute directory path containing the executable or an error
+///   if it cannot be determined.
+pub fn gpg_get_absolute_path_to_executable_parentdirectory() -> Result<PathBuf, io::Error> {
+    // Get the path to the current executable
+    let executable_path = std::env::current_exe().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Failed to determine current executable path: {}", e),
+        )
+    })?;
+    
+    // Get the directory containing the executable
+    let executable_directory = executable_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            "Failed to determine parent directory of executable",
+        )
+    })?;
+    
+    Ok(executable_directory.to_path_buf())
+}
+
+
+/// Converts a path to an absolute path based on the executable's directory location.
+/// Does NOT check if the path exists or attempt to create anything.
+///
+/// # Arguments
+///
+/// * `path_to_make_absolute` - A path to convert to an absolute path relative to 
+///   the executable's directory location.
+///
+/// # Returns
+///
+/// * `Result<PathBuf, io::Error>` - The absolute path based on the executable's directory or an error
+///   if the executable's path cannot be determined or if the path cannot be resolved.
+///
+/// # Examples
+///
+/// ```
+/// use manage_absolute_executable_directory_relative_paths::make_input_path_name_abs_executabledirectoryrelative_nocheck;
+///
+/// // Get an absolute path for "data/config.json" relative to the executable directory
+/// let abs_path = make_input_path_name_abs_executabledirectoryrelative_nocheck("data/config.json").unwrap();
+/// println!("Absolute path: {}", abs_path.display());
+/// ```
+pub fn gpg_make_input_path_name_abs_executabledirectoryrelative_nocheck<P: AsRef<Path>>(path_to_make_absolute: P) -> Result<PathBuf, io::Error> {
+    // Get the directory where the executable is located
+    let executable_directory = gpg_get_absolute_path_to_executable_parentdirectory()?;
+    
+    // Create a path by joining the executable directory with the provided path
+    let target_path = executable_directory.join(path_to_make_absolute);
+    
+    // If the path doesn't exist, we still return the absolute path without trying to canonicalize
+    if !gpg_abs_executable_directory_relative_exists(&target_path)? {
+        // Ensure the path is absolute (it should be since we joined with executable_directory)
+        if target_path.is_absolute() {
+            return Ok(target_path);
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Failed to create absolute path",
+            ));
+        }
+    }
+    
+    // Path exists, so we can canonicalize it to resolve any ".." or "." segments
+    target_path.canonicalize().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("Failed to canonicalize path: {}", e),
+        )
+    })
+}
+
+/// Checks if a path exists (either as a file or directory).
+///
+/// # Arguments
+///
+/// * `path_to_check` - The path to check for existence
+///
+/// # Returns
+///
+/// * `Result<bool, io::Error>` - Whether the path exists or an error
+pub fn gpg_abs_executable_directory_relative_exists<P: AsRef<Path>>(path_to_check: P) -> Result<bool, io::Error> {
+    let path = path_to_check.as_ref();
+    Ok(path.exists())
 }
 
