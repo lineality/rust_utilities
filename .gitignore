@@ -3,7 +3,12 @@
 debug/
 target/
 
-
+tests/
+data/
+test/
+log/
+logs/
+tmp/
 
 # uma directories
 project_graph_data/
@@ -12,7 +17,6 @@ uma_archive/
 sync_data/
 data_files/
 invites_updates/
-tests/
 
 # uma files
 uma.toml
