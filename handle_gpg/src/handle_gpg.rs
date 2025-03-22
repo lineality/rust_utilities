@@ -590,6 +590,77 @@ fn encrypt_file_with_public_key(
 }
 
 /// Main function to process a file: clearsign with your key and encrypt with recipient's public key
+/// Clearsigns a file with your GPG key and encrypts it with a recipient's public key.
+///
+/// # Overview
+/// This function provides a secure way to share files with specific recipients by:
+/// 1. Clearsigning the file with your private GPG key (provides authentication)
+/// 2. Encrypting the clearsigned file with the recipient's public key (provides confidentiality)
+///
+/// # Path Handling
+/// IMPORTANT: All file paths are processed as follows:
+/// - Input file path: Used as provided (should be an absolute path if possible)
+/// - Recipient public key path: Used as provided (should be an absolute path if possible)
+/// - Output file path: Automatically generated in `{EXECUTABLE_DIR}/invites_updates/outgoing/{original_filename}.gpg`
+/// - Temporary files: Created in the system's temporary directory with unique names
+///
+/// # Process Flow
+/// 1. Validates that your signing key exists in the GPG keyring
+/// 2. Creates necessary temporary and output directories
+/// 3. Clearsigns the input file with your private key
+/// 4. Encrypts the clearsigned file with the recipient's public key
+/// 5. Cleans up temporary files
+/// 6. Saves the final encrypted file to the output location
+///
+/// # Security Considerations
+/// - Uses GPG's "always" trust model for encryption (recipient key doesn't need to be fully trusted)
+/// - Creates and cleans up temporary files securely
+/// - Does not permanently import recipient keys to your keyring
+/// - Verifies key availability before beginning operations
+///
+/// # Arguments
+/// * `input_file_path` - Path to the file to be clearsigned and encrypted
+/// * `your_signing_key_id` - Your GPG key ID used for clearsigning (e.g., "7673C969D81E94C63D641CF84ED13C31924928A5")
+/// * `recipient_public_key_path` - Path to the recipient's public key file (ASCII-armored format)
+///
+/// # Returns
+/// * `Ok(())` - If the operation completes successfully
+/// * `Err(GpgError)` - If any step fails, with detailed error information
+///
+/// # Errors
+/// May return various `GpgError` types:
+/// * `GpgError::GpgOperationError` - If GPG operations fail (missing keys, invalid keys, etc.)
+/// * `GpgError::FileSystemError` - If file operations fail (permission issues, disk full, etc.)
+/// * `GpgError::PathError` - If path operations fail (invalid paths, missing directories, etc.)
+/// * `GpgError::TempFileError` - If temporary file operations fail
+///
+/// # Example
+/// ```
+/// use std::path::Path;
+/// 
+/// // Clearsign and encrypt a configuration file for a collaborator
+/// let result = clearsign_and_encrypt_file_for_recipient(
+///     &Path::new("/path/to/config.toml"),
+///     "7673C969D81E94C63D641CF84ED13C31924928A5",  // Your key ID
+///     &Path::new("/path/to/recipient_key.asc")
+/// );
+///
+/// match result {
+///     Ok(()) => println!("File successfully clearsigned and encrypted"),
+///     Err(e) => eprintln!("Error: {}", e.to_string()),
+/// }
+/// ```
+///
+/// # Related Functions
+/// * `clearsign_file_with_private_key()` - Lower-level function to just clearsign a file
+/// * `encrypt_file_with_public_key()` - Lower-level function to just encrypt a file
+/// * `validate_gpg_key()` - Used to check if a GPG key exists in the keyring
+///
+/// # GPG Requirements
+/// - GPG must be installed and available in the system PATH
+/// - Your private key must be available in your GPG keyring
+/// - Your private key should not have a passphrase, or GPG must be configured for non-interactive use
+///
 pub fn clearsign_and_encrypt_file_for_recipient(
     input_file_path: &Path,
     your_signing_key_id: &str,
