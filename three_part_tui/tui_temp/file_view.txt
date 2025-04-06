@@ -1,5 +1,5 @@
 src
 Cargo.lock
-target
 Cargo.toml
+target
 tui_temp

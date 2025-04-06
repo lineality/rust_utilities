@@ -1,174 +1,290 @@
-// src/main.rs
-mod externalized_input_buffer;  // declare module in main
-mod three_part_tui;            // declare module in main
-use crate::three_part_tui::ThreePartTui;
+use std::env;
+use std::fs;
+use std::hash::{Hash, Hasher};
+use std::collections::hash_map::DefaultHasher;
+use std::io::{self, Write, Read};
+use std::thread;
+use std::time::{
+Duration,
+//Instant,
+};
+use std::sync::mpsc::{self, Sender, Receiver, TryRecvError};
 
-/*
-# Integration Guide: ExternalizedInputBuffer into ThreePartTUI
-
-three_part_tui/src$ tree
-.
-├── externalized_input_buffer.rs
-├── main.rs
-└── three_part_tui.rs
-
-
-
-## Background & Purpose
-The ThreePartTUI and ExternalizedInputBuffer are designed to solve a specific problem: displaying multiple updating sections on a terminal without them interfering with each other. 
-
-### Current Components:
-1. **ThreePartTUI**: Uses temp files to maintain three separate display areas:
-   - File listing (top)
-   - Info bar (middle)
-   - Input area (bottom)
-   Each section reads from its own temp file, allowing independent updates.
-
-2. **ExternalizedInputBuffer**: Manages character-by-character input while writing state to a file:
-   - Accumulates characters until Enter
-   - Writes current state to a temp file
-   - Handles backspace and basic input control
-   - Provides access to buffer state via `get_buffer()`
-
-## Why This Design?
-The key challenge was separating display updates from input handling. The solution uses temp files as "display buffers" because:
-1. Each part can update independently
-2. Changes are detected by checking file lengths
-3. No need for complex terminal cursor management
-4. Input can be monitored without interfering with display
-
-## Integration Steps
-
-### 1. File Structure
-```rust
-src/
-  lib.rs               // Main TUI library
-  input_buffer.rs      // ExternalizedInputBuffer module
-  three_part_tui.rs    // ThreePartTUI implementation
-```
-
-### 2. Key Integration Points
-- The input_buffer_path in ThreePartTUI should be passed to ExternalizedInputBuffer
-- The main loop needs to:
-  ```rust
-  loop {
-      // Handle input without blocking display
-      input_buffer.handle_char()?;
-      
-      // Check all files for changes
-      if self.needs_refresh()? {
-          self.display_all()?;
-      }
-      
-      thread::sleep(Duration::from_millis(50));
-  }
-  ```
-
-### 3. Known Issues & Solutions
-1. **Display Refresh**: Only refresh when files change (already implemented in needs_refresh())
-2. **Input Handling**: 
-   - Don't clear screen while typing
-   - Use ExternalizedInputBuffer's file for input display
-3. **File Management**:
-   - Create temp directory if it doesn't exist
-   - Clean up temp files on exit
-
-## Testing Strategy
-1. Test input accumulation:
-   - Type characters, verify they appear
-   - Press Enter, verify line completion
-   - Check buffer clears properly
-
-2. Test display updates:
-   - Verify file listing updates
-   - Verify info bar updates
-   - Verify input shows while typing
-
-3. Test integration:
-   - All three sections visible
-   - No interference between sections
-   - Clean exit and cleanup
-
-## Future Considerations
-1. **Error Handling**: 
-   - File system errors
-   - Input buffer overflow
-   - Terminal resize
-
-2. **Performance**:
-   - File change detection optimization
-   - Refresh rate tuning
-   - Buffer size limits
-
-3. **Features to Consider**:
-   - Configurable update rates
-   - Custom input handlers
-   - Section resize commands
-
-## Code Example for Integration
-```rust
-// Example structure after integration
-pub struct ThreePartTui {
-    temp_dir: PathBuf,
-    file_view_path: PathBuf,
-    info_bar_path: PathBuf,
-    input_buffer: ExternalizedInputBuffer,
-    last_file_view_len: u64,
-    last_info_bar_len: u64,
+/// Application mode - either refresh terminal or accept input
+#[derive(PartialEq, Clone, Copy, Debug)]
+enum Mode {
+    Refresh, // Allow refreshes, input may be interrupted
+    Insert,  // No refreshes, focus on input
 }
 
-impl ThreePartTui {
-    pub fn new() -> io::Result<Self> {
-        let temp_dir = PathBuf::from("tui_temp");
-        fs::create_dir_all(&temp_dir)?;
+/// Holds application state
+struct App {
+    mode: Mode,
+    input_buffer: String,
+    files: Vec<String>,
+    last_hash: u64,
+    //last_refresh: Instant,
+    terminal_width: u16,
+    terminal_height: u16,
+}
+
+impl App {
+    fn new() -> io::Result<Self> {
+        // Default terminal size if we can't detect it
+        let (width, height) = (80, 24);
         
-        let input_buffer = ExternalizedInputBuffer::new(
-            temp_dir.join("input.txt"),
-            true  // show cursor
-        )?;
-        
-        // ... rest of initialization
+        Ok(Self {
+            mode: Mode::Refresh,
+            input_buffer: String::new(),
+            files: scan_directory(".")?,
+            last_hash: calculate_directory_hash(".")?,
+            //last_refresh: Instant::now(),
+            terminal_width: width,
+            terminal_height: height,
+        })
     }
-    
-    pub fn run(&mut self) -> io::Result<()> {
-        // File view update thread stays the same
+
+    /// Toggle between Refresh and Insert modes
+    fn toggle_mode(&mut self) -> Mode {
+        let previous_mode = self.mode;
         
-        loop {
-            // Handle input
-            self.input_buffer.handle_char()?;
-            
-            // Update display if needed
-            if self.needs_refresh()? {
-                self.display_all()?;
-            }
-            
-            thread::sleep(Duration::from_millis(50));
+        self.mode = match self.mode {
+            Mode::Refresh => Mode::Insert,
+            Mode::Insert => Mode::Refresh,
+        };
+        
+        previous_mode
+    }
+
+    /// Check for changes in directory and update file list if needed
+    /// Returns true if directory changed
+    fn update_directory_list(&mut self) -> io::Result<bool> {
+        let current_hash = calculate_directory_hash(".")?;
+        
+        if current_hash != self.last_hash {
+            self.files = scan_directory(".")?;
+            self.last_hash = current_hash;
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
+
+    /// Force update directory list regardless of hash changes
+    fn force_update_directory_list(&mut self) -> io::Result<()> {
+        self.files = scan_directory(".")?;
+        self.last_hash = calculate_directory_hash(".")?;
+        Ok(())
+    }
+
+    /// Render the current application state to the terminal
+    fn render(&self) -> io::Result<()> {
+        // Clear screen
+        print!("\x1B[2J\x1B[1;1H");
+        
+        // 1. Display directory files
+        let path = env::current_dir()?;
+        println!("Current Path: {}", path.display());
+        println!();
+        
+        for (i, item) in self.files.iter().enumerate() {
+            println!("{}. {}", i + 1, item);
+        }
+        
+        // Fill the rest of the screen with empty lines to ensure consistent layout
+        let path_length = 2;  // Path header + empty line
+        let file_count = self.files.len();
+        let info_bar_position = (self.terminal_height - 2) as usize;
+        
+        for _ in 0..info_bar_position.saturating_sub(path_length + file_count) {
+            println!();
+        }
+        
+        // 2. Display info bar with mode
+        match self.mode {
+            Mode::Refresh => println!("\\|/  Refresh Mode - 'enter' to toggle insert-mode"),
+            Mode::Insert => println!(">_  Insert Mode - 'enter' to toggle refresh-mode"),
+        }
+        
+        // 3. Display user prompt
+        print!("> {}", self.input_buffer);
+        io::stdout().flush()
+    }
 }
-```
 
-## Testing Commands
-```bash
-# Run basic test
-cargo run
+/// Scan current directory and return list of files
+fn scan_directory(dir: &str) -> io::Result<Vec<String>> {
+    let mut files = Vec::new();
+    
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_name = entry.file_name().to_string_lossy().into_owned();
+        files.push(file_name);
+    }
+    
+    files.sort();
+    Ok(files)
+}
 
-# Run with debug output
-RUST_BACKTRACE=1 cargo run
+/// Calculate hash of directory contents to detect changes
+fn calculate_directory_hash(dir: &str) -> io::Result<u64> {
+    let mut hasher = DefaultHasher::new();
+    let entries = fs::read_dir(dir)?;
+    
+    for entry in entries {
+        let entry = entry?;
+        let metadata = entry.metadata()?;
+        
+        // Hash relevant file metadata
+        entry.file_name().hash(&mut hasher);
+        metadata.len().hash(&mut hasher);
+        if let Ok(modified) = metadata.modified() {
+            modified.hash(&mut hasher);
+        }
+    }
+    
+    Ok(hasher.finish())
+}
 
-# Clean temp files
-rm -rf tui_temp/
-```
+/// Message types for communication between threads
+enum Message {
+    Input(char),
+    Backspace,
+    Enter,
+    Refresh,
+    Quit,
+}
 
-## Next Steps
-1. Implement the integration as shown above
-2. Add error handling
-3. Test all components together
-4. Add any needed cleanup code
-5. Document any new issues found
-
-*/
-fn main() -> std::io::Result<()> {
-    let mut tui = ThreePartTui::new()?;
-    tui.run()
+fn main() -> io::Result<()> {
+    // Initialize app state
+    let mut app = App::new()?;
+    
+    // Set up channel for communication between input thread and main thread
+    let (tx, rx): (Sender<Message>, Receiver<Message>) = mpsc::channel();
+    
+    // Input thread - constantly reads from stdin
+    let input_tx = tx.clone();
+    thread::spawn(move || {
+        let mut stdin = io::stdin();
+        let mut buffer = [0; 1];
+        
+        loop {
+            if stdin.read_exact(&mut buffer).is_ok() {
+                match buffer[0] {
+                    b'\n' | b'\r' => { 
+                        input_tx.send(Message::Enter).unwrap_or(());
+                    },
+                    8 | 127 => { 
+                        input_tx.send(Message::Backspace).unwrap_or(());
+                    },
+                    b'q' => {
+                        input_tx.send(Message::Quit).unwrap_or(());
+                    },
+                    c => {
+                        input_tx.send(Message::Input(c as char)).unwrap_or(());
+                    }
+                }
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    });
+    
+    // Refresh thread - periodically checks directory for changes
+    let refresh_tx = tx.clone();
+    thread::spawn(move || {
+        let mut last_hash = 0;
+        
+        loop {
+            // Only calculate hash every 500ms to avoid excessive CPU usage
+            thread::sleep(Duration::from_millis(500));
+            
+            if let Ok(current_hash) = calculate_directory_hash(".") {
+                if current_hash != last_hash {
+                    last_hash = current_hash;
+                    refresh_tx.send(Message::Refresh).unwrap_or(());
+                }
+            }
+        }
+    });
+    
+    // Initial render
+    app.render()?;
+    
+    // Main application loop
+    let mut force_refresh = false;
+    
+    loop {
+        // Process messages from threads
+        match rx.try_recv() {
+            Ok(Message::Input(c)) => {
+                if app.mode == Mode::Insert || !force_refresh {
+                    app.input_buffer.push(c);
+                    force_refresh = true; // Need to update display with new input
+                }
+            },
+            Ok(Message::Backspace) => {
+                app.input_buffer.pop();
+                force_refresh = true;
+            },
+            Ok(Message::Enter) => {
+                if app.input_buffer.is_empty() {
+                    // Toggle mode
+                    let previous_mode = app.toggle_mode();
+                    
+                    // If switching from Insert to Refresh, immediately refresh directory
+                    if previous_mode == Mode::Insert && app.mode == Mode::Refresh {
+                        // Force an immediate directory update to show any changes that occurred
+                        app.force_update_directory_list()?;
+                    }
+                    
+                    force_refresh = true;
+                } else {
+                    // Process command
+                    if app.input_buffer == "q" || app.input_buffer == "quit" {
+                        break;
+                    }
+                    
+                    // Here you would handle the input command
+                    println!("\nYou typed: {}", app.input_buffer);
+                    app.input_buffer.clear();
+                    force_refresh = true;
+                }
+            },
+            Ok(Message::Refresh) => {
+                if app.mode == Mode::Refresh {
+                    // If in refresh mode, directory changes should trigger refresh
+                    // and discard any partial input
+                    if app.update_directory_list()? {
+                        app.input_buffer.clear(); // Discard input buffer in refresh mode
+                        force_refresh = true;
+                    }
+                }
+            },
+            Ok(Message::Quit) => {
+                break;
+            },
+            Err(TryRecvError::Empty) => {
+                // No messages, continue
+            },
+            Err(TryRecvError::Disconnected) => {
+                // Channel closed, should exit
+                break;
+            }
+        }
+        
+        // Update display if needed
+        if force_refresh {
+            app.render()?;
+            force_refresh = false;
+        }
+        
+        // Small sleep to prevent tight loop
+        thread::sleep(Duration::from_millis(10));
+    }
+    
+    // Clear screen on exit
+    print!("\x1B[2J\x1B[1;1H");
+    io::stdout().flush()?;
+    
+    Ok(())
 }
