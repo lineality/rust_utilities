@@ -339,6 +339,7 @@ enum Message {
     Quit,
 }
 
+
 fn main() -> io::Result<()> {
     // Initialize app state
     let mut app = App::new()?;
