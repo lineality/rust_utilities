@@ -700,6 +700,76 @@ pub fn read_singleline_string_from_clearsigntoml(path_to_clearsigntoml_with_gpgk
     read_single_line_string_field_from_toml(path_to_clearsigntoml_with_gpgkey, field_name)
 }
 
+/// Reads a single-line string field from a clearsigned TOML file using a GPG key from a separate config file.
+///
+/// # Purpose
+/// This function provides a way to verify and read from clearsigned TOML files that don't contain
+/// their own GPG keys, instead using a key from a separate centralized config file. This approach
+/// helps maintain consistent key management across multiple clearsigned files.
+///
+/// # Process Flow
+/// 1. Extracts the GPG public key from the specified config file
+/// 2. Uses this key to verify the signature of the target clearsigned TOML file
+/// 3. If verification succeeds, reads the requested field from the verified file
+/// 4. Returns the field value or an appropriate error
+///
+/// # Arguments
+/// * `config_file_with_gpg_key` - Path to a clearsigned TOML file containing the GPG public key
+/// * `target_clearsigned_file` - Path to the clearsigned TOML file to read from (without its own GPG key)
+/// * `field_name` - Name of the field to read from the target file
+///
+/// # Returns
+/// * `Ok(String)` - The value of the requested field if verification succeeds
+/// * `Err(String)` - Detailed error message if any step fails
+///
+/// # Errors
+/// This function may return errors in several cases:
+/// * If the config file cannot be read or doesn't contain a valid GPG key
+/// * If the target file cannot be read or its signature cannot be verified with the provided key
+/// * If the specified field doesn't exist in the target file or has an invalid format
+///
+/// # Example
+/// ```
+/// let config_path = "config/security.toml";
+/// let target_path = "data/settings.toml";
+/// 
+/// match read_singleline_string_using_clearsignedconfig_from_clearsigntoml(
+///     config_path, 
+///     target_path, 
+///     "api_endpoint"
+/// ) {
+///     Ok(value) => println!("API Endpoint: {}", value),
+///     Err(e) => eprintln!("Error: {}", e)
+/// }
+/// ```
+pub fn read_singleline_string_using_clearsignedconfig_from_clearsigntoml(
+    config_file_with_gpg_key: &str,
+    target_clearsigned_file: &str, 
+    field_name: &str,
+) -> Result<String, String> {
+    // Step 1: Extract GPG key from the config file
+    let key = extract_gpg_key_from_clearsigntoml(config_file_with_gpg_key, "gpg_key_public")
+        .map_err(|e| format!("Failed to extract GPG key from config file '{}': {}", config_file_with_gpg_key, e))?;
+
+    // Step 2: Verify the target file using the extracted key
+    let verification_result = verify_clearsign(target_clearsigned_file, &key)
+        .map_err(|e| format!("Failed during verification process: {}", e))?;
+
+    // Step 3: Check verification result
+    if !verification_result {
+        return Err(format!(
+            "GPG signature verification failed for file '{}' using key from '{}'",
+            target_clearsigned_file,
+            config_file_with_gpg_key
+        ));
+    }
+
+    // Step 4: Read the requested field from the verified file
+    read_single_line_string_field_from_toml(target_clearsigned_file, field_name)
+        .map_err(|e| format!("Failed to read field '{}' from verified file '{}': {}", 
+                            field_name, target_clearsigned_file, e))
+}
+
 /// Reads a multi-line string field from a clearsigned TOML file.
 ///
 /// # Arguments
@@ -756,6 +826,70 @@ mod tests {
 
     // Mock test for clearsign functions
     // These tests will be skipped in environments without GPG
+#[test]
+fn test_read_singleline_string_using_clearsignedconfig() {
+    // Skip test if GPG is not available
+    if !Command::new("gpg").arg("--version").status().map_or(false, |s| s.success()) {
+        println!("Skipping test_read_singleline_string_using_clearsignedconfig because GPG is not available");
+        return;
+    }
+
+    // Create test files
+    let config_content = r#"
+        gpg_key_public = """
+        -----BEGIN PGP PUBLIC KEY BLOCK-----
+        mQENBF0blBUBCADPhh9ZoC2QXlA8Xu0ghtQTf5VQgC8CmxPM/H85q8HyITWJ6S+c
+        LCG9OSvqpqxN9VTRLVqf9051Rj4nQzGEEzqUJp3zHfLKZN3SNKVnMn8CyeMoWJGg
+        XgNjnyfk687AB0Pn5JApzVaS9JDYVOPmTNXk4T9wLs2vYbKQ9E4/Mv0fnRBYaAgm
+        JQT53jdH/QUIVIqnYvMbwB4TZY8MfA4AoT4QyqDB5ppiUWH5S2PJqId29Z/Y45J+
+        -----END PGP PUBLIC KEY BLOCK-----
+        """
+    "#;
+    
+    let target_content = r#"
+        api_endpoint = "https://api.example.com/v1"
+        timeout = 30
+    "#;
+    
+    let config_file = "test_config.toml";
+    let target_file = "test_target.toml";
+    
+    write(config_file, config_content).unwrap();
+    write(target_file, target_content).unwrap();
+    
+    // Test error cases
+    
+    // Case 1: Missing file
+    let result = read_singleline_string_using_clearsignedconfig_from_clearsigntoml(
+        "nonexistent_config.toml",
+        target_file,
+        "api_endpoint"
+    );
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Failed to extract GPG key"));
+    
+    // Case 2: Missing target field
+    let result = read_singleline_string_using_clearsignedconfig_from_clearsigntoml(
+        config_file,
+        target_file,
+        "nonexistent_field"
+    );
+    // This will likely fail verification because our mock files aren't actually clearsigned,
+    // but we're testing the error handling pattern
+    assert!(result.is_err());
+    
+    // Clean up
+    let _ = remove_file(config_file);
+    let _ = remove_file(target_file);
+    
+    // Note: A full test of successful verification would require:
+    // 1. Actually generating GPG keys
+    // 2. Creating properly clearsigned files
+    // Which would be more appropriate for integration tests
+    
+    println!("Error cases for external config GPG verification tested successfully");
+}
+    
     #[test]
     fn test_clearsign_reading() {
         // This test should be run only if GPG is available
