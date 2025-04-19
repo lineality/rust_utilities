@@ -1132,3 +1132,100 @@ pub fn gpg_abs_executable_directory_relative_exists<P: AsRef<Path>>(path_to_chec
     let path = path_to_check.as_ref();
     Ok(path.exists())
 }
+
+/// Decrypts a GPG-encrypted file to a specified output file
+///
+/// This function performs decryption of a GPG-encrypted file using the user's private key
+/// and saves the result to the specified output file. It does not perform signature verification,
+/// which allows for examining the decrypted content before validating signatures.
+///
+/// # Arguments
+/// * `input_file_path` - Path to the GPG-encrypted input file
+/// * `output_file_path` - Path where the decrypted content should be saved
+///
+/// # Returns
+/// * `Ok(())` if the decryption succeeds
+/// * `Err(GpgError)` if the decryption fails
+///
+/// # Errors
+/// * `GpgError::PathError` - If the input file doesn't exist or output path is invalid
+/// * `GpgError::GpgOperationError` - If the GPG decryption operation fails
+/// 
+/// # Example
+/// ```
+/// let encrypted_file = Path::new("message.gpg");
+/// let decrypted_file = Path::new("decrypted_content.txt");
+/// 
+/// match decrypt_gpg_file_to_output(&encrypted_file, &decrypted_file) {
+///     Ok(_) => println!("Decryption successful"),
+///     Err(e) => eprintln!("Decryption failed: {:?}", e),
+/// }
+/// ```
+pub fn decrypt_gpg_file_to_output(input_file_path: &Path, output_file_path: &Path) -> Result<(), GpgError> {
+    // Debug logging
+    // debug_log!("Decrypting GPG file: {} to: {}", 
+    //           input_file_path.display(), output_file_path.display());
+    println!("Decrypting GPG file: {} to: {}", 
+               input_file_path.display(), output_file_path.display());
+               
+    // Check if input file exists
+    if !input_file_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Input file does not exist: {}", 
+            input_file_path.display()
+        )));
+    }
+    
+    // Convert paths to strings for the command
+    let input_path_str = input_file_path
+        .to_str()
+        .ok_or_else(|| GpgError::PathError(format!(
+            "Failed to convert input path to string: {}", 
+            input_file_path.display()
+        )))?;
+    
+    let output_path_str = output_file_path
+        .to_str()
+        .ok_or_else(|| GpgError::PathError(format!(
+            "Failed to convert output path to string: {}", 
+            output_file_path.display()
+        )))?;
+    
+    // Create the GPG command to decrypt the file
+    let mut command = Command::new("gpg");
+    command
+        .arg("--batch")
+        .arg("--yes")
+        .arg("--decrypt")
+        .arg("--output")
+        .arg(output_path_str)
+        .arg(input_path_str);
+    
+    // debug_log!("GPG decrypt command: {:?}", command);
+    println!("GPG decrypt command: {:?}", command);
+    
+    // Execute the command and check for success
+    let output = command.output()
+        .map_err(|e| GpgError::GpgOperationError(format!(
+            "Failed to execute GPG command: {}", e
+        )))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(GpgError::GpgOperationError(format!(
+            "GPG decryption failed: {}", stderr
+        )));
+    }
+    
+    // Verify the output file was created
+    if !output_file_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Decryption succeeded but output file was not created: {}", 
+            output_file_path.display()
+        )));
+    }
+
+    // debug_log!("Successfully decrypted file");    
+    println!("Successfully decrypted file");
+    Ok(())
+}

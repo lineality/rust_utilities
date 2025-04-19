@@ -2051,3 +2051,230 @@ pub fn manual_q_and_a_new_encrypted_clearsigntoml_verification() -> Result<(), S
     println!("Done! The verified clearsigned file has been saved.");
     Ok(())
 }
+
+
+/// Decrypts a GPG-encrypted file to a specified output file
+///
+/// This function performs decryption of a GPG-encrypted file using the user's private key
+/// and saves the result to the specified output file. It does not perform signature verification,
+/// which allows for examining the decrypted content before validating signatures.
+///
+/// # Arguments
+/// * `input_file_path` - Path to the GPG-encrypted input file
+/// * `output_file_path` - Path where the decrypted content should be saved
+///
+/// # Returns
+/// * `Ok(())` if the decryption succeeds
+/// * `Err(GpgError)` if the decryption fails
+///
+/// # Errors
+/// * `GpgError::PathError` - If the input file doesn't exist or output path is invalid
+/// * `GpgError::GpgOperationError` - If the GPG decryption operation fails
+pub fn decrypt_gpg_file_to_output(input_file_path: &Path, output_file_path: &Path) -> Result<(), GpgError> {
+    // Debug logging
+    println!("Decrypting GPG file: {} to: {}", 
+               input_file_path.display(), output_file_path.display());
+    
+    // Check if input file exists
+    if !input_file_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Input file does not exist: {}", 
+            input_file_path.display()
+        )));
+    }
+    
+    // Convert paths to strings for the command
+    let input_path_str = input_file_path
+        .to_str()
+        .ok_or_else(|| GpgError::PathError(format!(
+            "Failed to convert input path to string: {}", 
+            input_file_path.display()
+        )))?;
+    
+    let output_path_str = output_file_path
+        .to_str()
+        .ok_or_else(|| GpgError::PathError(format!(
+            "Failed to convert output path to string: {}", 
+            output_file_path.display()
+        )))?;
+    
+    // Create the GPG command to decrypt the file
+    let mut command = Command::new("gpg");
+    command
+        .arg("--batch")
+        .arg("--yes")
+        .arg("--decrypt")
+        .arg("--output")
+        .arg(output_path_str)
+        .arg(input_path_str);
+    
+    println!("GPG decrypt command: {:?}", command);
+    
+    // Execute the command and check for success
+    let output = command.output()
+        .map_err(|e| GpgError::GpgOperationError(format!(
+            "Failed to execute GPG command: {}", e
+        )))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(GpgError::GpgOperationError(format!(
+            "GPG decryption failed: {}", stderr
+        )));
+    }
+    
+    // Verify the output file was created
+    if !output_file_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Decryption succeeded but output file was not created: {}", 
+            output_file_path.display()
+        )));
+    }
+    
+    println!("Successfully decrypted file");
+    Ok(())
+}
+
+/// Verifies a clearsigned file and extracts its content to a separate output file
+///
+/// This function performs two distinct operations:
+/// 1. Verifies the signature on a clearsigned file using a provided public key file
+/// 2. If verification succeeds, extracts just the content portion (without signature blocks)
+///    and writes it to the specified output file
+///
+/// # Arguments
+/// * `clearsigned_input_path` - Path to the clearsigned file to verify
+/// * `public_key_file_path` - Path to the file containing the public key for verification
+/// * `extracted_content_output_path` - Path where the extracted content should be saved
+///
+/// # Returns
+/// * `Ok(())` if both verification and extraction succeed
+/// * `Err(GpgError)` if either verification or extraction fails
+///
+/// # Errors
+/// * `GpgError::PathError` - If input files don't exist or paths are invalid
+/// * `GpgError::ValidationError` - If signature verification fails
+/// * `GpgError::GpgOperationError` - If GPG operations fail
+pub fn verify_clearsigned_file_and_extract_content_to_output(
+    clearsigned_input_path: &Path,
+    public_key_file_path: &Path,
+    extracted_content_output_path: &Path
+) -> Result<(), GpgError> {
+    // Debug logging
+    println!("Starting verification and extraction process");
+    println!("Clearsigned input file: {}", clearsigned_input_path.display());
+    println!("Public key file: {}", public_key_file_path.display());
+    println!("Output file for extracted content: {}", extracted_content_output_path.display());
+    
+    // STEP 1: Validate input file paths exist
+    if !clearsigned_input_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Clearsigned input file does not exist: {}", 
+            clearsigned_input_path.display()
+        )));
+    }
+    
+    if !public_key_file_path.exists() {
+        return Err(GpgError::PathError(format!(
+            "Public key file does not exist: {}", 
+            public_key_file_path.display()
+        )));
+    }
+    
+    // STEP 2: Read the content of the public key file
+    let public_key = match fs::read_to_string(public_key_file_path) {
+        Ok(key) => key,
+        Err(e) => return Err(GpgError::GpgOperationError(format!(
+            "Failed to read public key file: {}", e
+        )))
+    };
+    
+    // STEP 3: Convert input file path to string for the verify_clearsign function
+    let clearsigned_input_path_str = clearsigned_input_path
+        .to_str()
+        .ok_or_else(|| GpgError::PathError(format!(
+            "Failed to convert input file path to string: {}", 
+            clearsigned_input_path.display()
+        )))?;
+    
+    // STEP 4: Verify the signature using the existing verify_clearsign function
+    println!("Verifying clearsigned file signature");
+    let verification_result = verify_clearsign(clearsigned_input_path_str, &public_key)
+        .map_err(|e| GpgError::GpgOperationError(format!(
+            "Failed to verify clearsigned file: {}", e
+        )))?;
+    
+    // STEP 5: Check verification result, abort if verification failed
+    if !verification_result {
+        println!("Signature verification failed");
+        return Err(GpgError::ValidationError(
+            "Signature verification failed".to_string()
+        ));
+    }
+    
+    println!("Signature verification succeeded");
+    
+    // STEP 6: Read the content of the input file for extraction
+    let clearsigned_content = match fs::read_to_string(clearsigned_input_path) {
+        Ok(content) => content,
+        Err(e) => return Err(GpgError::GpgOperationError(format!(
+            "Failed to read clearsigned file for content extraction: {}", e
+        )))
+    };
+    
+    // STEP 7: Identify the clearsigned format markers
+    // Clearsigned files have this structure:
+    // -----BEGIN PGP SIGNED MESSAGE-----
+    // Hash: SHA256
+    // 
+    // [actual content]
+    // -----BEGIN PGP SIGNATURE-----
+    // [signature data]
+    // -----END PGP SIGNATURE-----
+    let begin_content_marker = "-----BEGIN PGP SIGNED MESSAGE-----";
+    let begin_signature_marker = "-----BEGIN PGP SIGNATURE-----";
+    
+    // STEP 8: Validate the file has the expected clearsigned format
+    if !clearsigned_content.contains(begin_content_marker) || !clearsigned_content.contains(begin_signature_marker) {
+        println!("Input file does not have the expected clearsigned format");
+        return Err(GpgError::ValidationError(
+            "Input file does not have the expected clearsigned format".to_string()
+        ));
+    }
+    
+    // STEP 9: Find where the actual content starts (after the header and empty line)
+    println!("Extracting content portion from clearsigned file");
+    let content_start = clearsigned_content
+        .find(begin_content_marker)
+        .and_then(|pos| {
+            // Look for the empty line after the header
+            clearsigned_content[pos..].find("\n\n")
+                .map(|rel_pos| pos + rel_pos + 2) // +2 to skip the double newline
+        })
+        .ok_or_else(|| GpgError::ValidationError(
+            "Failed to locate content section in clearsigned file".to_string()
+        ))?;
+    
+    // STEP 10: Find where the signature starts
+    let signature_start = clearsigned_content
+        .find(begin_signature_marker)
+        .ok_or_else(|| GpgError::ValidationError(
+            "Failed to locate signature section in clearsigned file".to_string()
+        ))?;
+    
+    // STEP 11: Extract only the content portion (between header and signature)
+    let extracted_content = clearsigned_content[content_start..signature_start].trim();
+    
+    // STEP 12: Write the extracted content to the output file
+    println!("Writing extracted content to output file");
+    match fs::write(extracted_content_output_path, extracted_content) {
+        Ok(_) => {
+            println!("Successfully verified clearsigned file and extracted content to: {}", 
+                      extracted_content_output_path.display());
+            Ok(())
+        },
+        Err(e) => Err(GpgError::GpgOperationError(format!(
+            "Failed to write extracted content to output file: {}", e
+        )))
+    }
+}
