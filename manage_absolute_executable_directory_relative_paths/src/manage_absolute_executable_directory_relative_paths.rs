@@ -50,6 +50,7 @@ Never use unwrap.
 ```
 */
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::io;
 
@@ -277,6 +278,79 @@ pub fn make_verify_or_create_executabledirectoryrelative_canonicalized_dir_path(
                 format!("Failed to canonicalize existing directory path: {}", canonicalization_error)
             )
         })
+    }
+}
+
+/// Counts the number of subdirectories in the specified directory using executable-relative paths.
+///
+/// This function verifies the target directory exists, converts the path to be relative to the
+/// executable's location, counts only subdirectories (not files), and handles errors gracefully.
+/// If any errors occur at any step, the function returns 0 without panicking.
+///
+/// # Arguments
+///
+/// * `dir_path` - A path to the directory whose subdirectories should be counted.
+///                Can be absolute or relative to the executable's directory.
+///
+/// # Returns
+///
+/// * `usize` - The number of subdirectories found, or 0 if any errors occur
+///   (directory doesn't exist, not a directory, permission errors, etc.)
+///
+/// # Examples
+///
+/// ```
+/// // Count subdirectories in "data/team_channels" relative to executable location
+/// let channel_count = count_subdirectories_executabledirectoryrelative_default_zero("data/team_channels");
+/// println!("Found {} team channels", channel_count);
+/// ```
+pub fn count_subdirectories_executabledirectoryrelative_default_zero<P: AsRef<Path>>(dir_path: P) -> usize {
+    // First verify the path exists and is a directory
+    let abs_path = match make_dir_path_abs_executabledirectoryrelative_canonicalized_or_error(dir_path) {
+        Ok(path) => {
+            println!("Found valid directory at: {:?}", path);
+            path
+        },
+        Err(e) => {
+            // This covers cases where the directory doesn't exist or isn't a directory
+            println!("Error: directory validation failed: {}", e);
+            return 0;
+        }
+    };
+
+    // Attempt to read directory entries
+    match fs::read_dir(&abs_path) {
+        Ok(entries) => {
+            // Count only directories
+            let count = entries
+                .filter_map(|entry_result| {
+                    match entry_result {
+                        Ok(entry) => {
+                            match entry.file_type() {
+                                Ok(file_type) if file_type.is_dir() => Some(()),
+                                Ok(_) => None, // Not a directory
+                                Err(e) => {
+                                    println!("Error determining file type for {:?}: {}", 
+                                              entry.path(), e);
+                                    None
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            println!("Error reading directory entry: {}", e);
+                            None
+                        }
+                    }
+                })
+                .count();
+            
+            println!("Found {} subdirectories in {:?}", count, abs_path);
+            count
+        },
+        Err(e) => {
+            println!("Error reading directory contents of {:?}: {}", abs_path, e);
+            0 // Return 0 on error
+        }
     }
 }
 
