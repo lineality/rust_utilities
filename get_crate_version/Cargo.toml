@@ -1,0 +1,17 @@
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.35" }
+
+[dev-dependencies]
+version-compare = "0.1"
+criterion = { version = "0.5" }
+
+[package]
+name = "get_crate_version"
+version = "9.2.3"
+edition = "2024"
+authors = ["Test Author"]
+description = "Test crate for version parsing"
+
+[build-dependencies]
+version_check = "0.9"

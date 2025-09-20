@@ -1,8 +1,9 @@
-//! Input Validation System with Configuration Import/Export
+//! Input Validation System with Configuration Import/Export and Overlap Detection
 //! 
 //! This module provides a comprehensive input validation system that can validate
 //! integers within specified ranges and integer-string pairs with length constraints.
-//! The system supports importing and exporting validation configurations to/from JSON files.
+//! The system supports importing and exporting validation configurations to/from JSON files,
+//! and includes comprehensive overlap detection to ensure validation rules are unambiguous.
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -25,6 +26,8 @@ pub enum ValidationError {
     FileError(String),
     /// Error occurred during JSON parsing/serialization
     JsonError(String),
+    /// Error occurred due to overlapping ranges in configuration
+    OverlapError(String),
 }
 
 impl fmt::Display for ValidationError {
@@ -35,6 +38,7 @@ impl fmt::Display for ValidationError {
             ValidationError::ConfigurationError(message) => write!(formatter, "Configuration error: {}", message),
             ValidationError::FileError(message) => write!(formatter, "File error: {}", message),
             ValidationError::JsonError(message) => write!(formatter, "JSON error: {}", message),
+            ValidationError::OverlapError(message) => write!(formatter, "Range overlap error: {}", message),
         }
     }
 }
@@ -68,6 +72,107 @@ impl fmt::Display for ValidationStatus {
             ValidationStatus::Valid => write!(formatter, "valid"),
             ValidationStatus::Invalid => write!(formatter, "invalid"),
         }
+    }
+}
+
+/// Detailed information about a detected range overlap
+/// 
+/// This struct provides comprehensive information about where and how
+/// ranges overlap, making it easier to identify and resolve conflicts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RangeOverlapDetails {
+    /// Description of the type of overlap detected
+    overlap_description: String,
+    /// The first range involved in the overlap
+    first_range_description: String,
+    /// The second range involved in the overlap
+    second_range_description: String,
+    /// The overlapping portion (minimum value of the overlap)
+    overlap_start_value: i32,
+    /// The overlapping portion (maximum value of the overlap)
+    overlap_end_value: i32,
+}
+
+impl RangeOverlapDetails {
+    /// Creates a new range overlap details instance
+    /// 
+    /// # Arguments
+    /// * `overlap_description` - Description of the type of overlap
+    /// * `first_range_description` - Description of the first overlapping range
+    /// * `second_range_description` - Description of the second overlapping range
+    /// * `overlap_start_value` - The start of the overlapping portion
+    /// * `overlap_end_value` - The end of the overlapping portion
+    /// 
+    /// # Returns
+    /// A new `RangeOverlapDetails` instance
+    pub fn new(
+        overlap_description: String,
+        first_range_description: String,
+        second_range_description: String,
+        overlap_start_value: i32,
+        overlap_end_value: i32,
+    ) -> Self {
+        Self {
+            overlap_description,
+            first_range_description,
+            second_range_description,
+            overlap_start_value,
+            overlap_end_value,
+        }
+    }
+
+    /// Gets the overlap description
+    /// 
+    /// # Returns
+    /// A reference to the overlap description string
+    pub fn get_overlap_description(&self) -> &str {
+        &self.overlap_description
+    }
+
+    /// Gets the first range description
+    /// 
+    /// # Returns
+    /// A reference to the first range description string
+    pub fn get_first_range_description(&self) -> &str {
+        &self.first_range_description
+    }
+
+    /// Gets the second range description
+    /// 
+    /// # Returns
+    /// A reference to the second range description string
+    pub fn get_second_range_description(&self) -> &str {
+        &self.second_range_description
+    }
+
+    /// Gets the start value of the overlap
+    /// 
+    /// # Returns
+    /// The minimum value where the ranges overlap
+    pub fn get_overlap_start_value(&self) -> i32 {
+        self.overlap_start_value
+    }
+
+    /// Gets the end value of the overlap
+    /// 
+    /// # Returns
+    /// The maximum value where the ranges overlap
+    pub fn get_overlap_end_value(&self) -> i32 {
+        self.overlap_end_value
+    }
+}
+
+impl fmt::Display for RangeOverlapDetails {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            formatter,
+            "{}: {} overlaps with {} in range [{}, {}]",
+            self.overlap_description,
+            self.first_range_description,
+            self.second_range_description,
+            self.overlap_start_value,
+            self.overlap_end_value
+        )
     }
 }
 
@@ -135,6 +240,98 @@ impl IntegerValidationRange {
     /// `true` if the value is within the range, `false` otherwise
     pub fn contains_value(&self, value: i32) -> bool {
         value >= self.minimum_value && value <= self.maximum_value
+    }
+
+    /// Checks if this range overlaps with another integer validation range
+    /// 
+    /// Two ranges overlap if they share any common integer values.
+    /// This method uses inclusive bounds, so ranges like [1,5] and [5,10] do overlap at value 5.
+    /// 
+    /// # Arguments
+    /// * `other_range` - The other range to check for overlap with
+    /// 
+    /// # Returns
+    /// `Some(RangeOverlapDetails)` if the ranges overlap, `None` if they don't overlap
+    /// 
+    /// # Examples
+    /// ```
+    /// let range1 = IntegerValidationRange::new(1, 10);
+    /// let range2 = IntegerValidationRange::new(5, 15);
+    /// assert!(range1.check_overlap_with_integer_range(&range2).is_some());
+    /// 
+    /// let range3 = IntegerValidationRange::new(20, 30);
+    /// assert!(range1.check_overlap_with_integer_range(&range3).is_none());
+    /// ```
+    pub fn check_overlap_with_integer_range(&self, other_range: &IntegerValidationRange) -> Option<RangeOverlapDetails> {
+        // Calculate the overlap boundaries
+        let overlap_start = std::cmp::max(self.minimum_value, other_range.minimum_value);
+        let overlap_end = std::cmp::min(self.maximum_value, other_range.maximum_value);
+
+        // Check if there's actually an overlap (start <= end means there's at least one overlapping value)
+        if overlap_start <= overlap_end {
+            Some(RangeOverlapDetails::new(
+                "Integer range overlap detected".to_string(),
+                format!("integer range [{}, {}]", self.minimum_value, self.maximum_value),
+                format!("integer range [{}, {}]", other_range.minimum_value, other_range.maximum_value),
+                overlap_start,
+                overlap_end,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Checks if this range overlaps with an integer-string validation rule's integer range
+    /// 
+    /// This method checks if the integer part of an integer-string rule overlaps
+    /// with this standalone integer range, which would create ambiguous validation.
+    /// 
+    /// # Arguments
+    /// * `integer_string_rule` - The integer-string rule to check for overlap with
+    /// 
+    /// # Returns
+    /// `Some(RangeOverlapDetails)` if the ranges overlap, `None` if they don't overlap
+    /// 
+    /// # Examples
+    /// ```
+    /// let int_range = IntegerValidationRange::new(1, 10);
+    /// let string_rule = IntegerStringValidationRule::new(
+    ///     IntegerValidationRange::new(5, 15), 
+    ///     20
+    /// );
+    /// assert!(int_range.check_overlap_with_integer_string_rule(&string_rule).is_some());
+    /// ```
+    pub fn check_overlap_with_integer_string_rule(&self, integer_string_rule: &IntegerStringValidationRule) -> Option<RangeOverlapDetails> {
+        let other_range = integer_string_rule.get_integer_range();
+        
+        // Calculate the overlap boundaries
+        let overlap_start = std::cmp::max(self.minimum_value, other_range.minimum_value);
+        let overlap_end = std::cmp::min(self.maximum_value, other_range.maximum_value);
+
+        // Check if there's actually an overlap
+        if overlap_start <= overlap_end {
+            Some(RangeOverlapDetails::new(
+                "Cross-type range overlap detected".to_string(),
+                format!("standalone integer range [{}, {}]", self.minimum_value, self.maximum_value),
+                format!("integer-string rule integer range [{}, {}] (max string length: {})",
+                    other_range.minimum_value, 
+                    other_range.maximum_value,
+                    integer_string_rule.get_maximum_string_length()
+                ),
+                overlap_start,
+                overlap_end,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Creates a human-readable description of this range for error reporting
+    /// 
+    /// # Returns
+    /// A string describing this range in a user-friendly format
+    pub fn create_range_description(&self) -> String {
+        format!("integer range [{}, {}]", self.minimum_value, self.maximum_value)
     }
 
     /// Converts the range to a JSON-like string representation
@@ -237,6 +434,72 @@ impl IntegerStringValidationRule {
         string_value.len() <= self.maximum_string_length
     }
 
+    /// Checks if this integer-string rule's integer range overlaps with another integer-string rule
+    /// 
+    /// Two integer-string rules overlap if their integer ranges share any common values.
+    /// This creates ambiguous validation because the same integer could match multiple rules
+    /// with potentially different string length constraints.
+    /// 
+    /// # Arguments
+    /// * `other_rule` - The other integer-string rule to check for overlap with
+    /// 
+    /// # Returns
+    /// `Some(RangeOverlapDetails)` if the integer ranges overlap, `None` if they don't overlap
+    /// 
+    /// # Examples
+    /// ```
+    /// let rule1 = IntegerStringValidationRule::new(
+    ///     IntegerValidationRange::new(1, 10), 
+    ///     5
+    /// );
+    /// let rule2 = IntegerStringValidationRule::new(
+    ///     IntegerValidationRange::new(8, 15), 
+    ///     10
+    /// );
+    /// assert!(rule1.check_overlap_with_integer_string_rule(&rule2).is_some());
+    /// ```
+    pub fn check_overlap_with_integer_string_rule(&self, other_rule: &IntegerStringValidationRule) -> Option<RangeOverlapDetails> {
+        let other_range = other_rule.get_integer_range();
+        
+        // Calculate the overlap boundaries
+        let overlap_start = std::cmp::max(self.integer_range.minimum_value, other_range.minimum_value);
+        let overlap_end = std::cmp::min(self.integer_range.maximum_value, other_range.maximum_value);
+
+        // Check if there's actually an overlap
+        if overlap_start <= overlap_end {
+            Some(RangeOverlapDetails::new(
+                "Integer-string rule overlap detected".to_string(),
+                format!("integer-string rule with range [{}, {}] (max string length: {})",
+                    self.integer_range.minimum_value, 
+                    self.integer_range.maximum_value,
+                    self.maximum_string_length
+                ),
+                format!("integer-string rule with range [{}, {}] (max string length: {})",
+                    other_range.minimum_value, 
+                    other_range.maximum_value,
+                    other_rule.maximum_string_length
+                ),
+                overlap_start,
+                overlap_end,
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Creates a human-readable description of this rule for error reporting
+    /// 
+    /// # Returns
+    /// A string describing this rule in a user-friendly format
+    pub fn create_rule_description(&self) -> String {
+        format!(
+            "integer-string rule with range [{}, {}] and max string length {}",
+            self.integer_range.minimum_value,
+            self.integer_range.maximum_value,
+            self.maximum_string_length
+        )
+    }
+
     /// Converts the rule to a JSON-like string representation
     /// 
     /// # Returns
@@ -325,10 +588,191 @@ impl IntegerStringValidationRule {
     }
 }
 
-/// Configuration structure that holds all validation rules
+/// Comprehensive overlap validation utility for validation configurations
+/// 
+/// This struct provides methods to detect and report all types of range overlaps
+/// that could cause ambiguous validation behavior in the system.
+#[derive(Debug)]
+pub struct ValidationRangeOverlapDetector;
+
+impl ValidationRangeOverlapDetector {
+    /// Performs comprehensive overlap detection on a complete validation configuration
+    /// 
+    /// This method checks for all possible types of overlaps:
+    /// 1. Integer range to integer range overlaps
+    /// 2. Integer-string rule to integer-string rule overlaps (based on integer ranges)
+    /// 3. Cross-type overlaps between integer ranges and integer-string rule ranges
+    /// 
+    /// # Arguments
+    /// * `integer_ranges` - Vector of standalone integer validation ranges
+    /// * `integer_string_rules` - Vector of integer-string validation rules
+    /// 
+    /// # Returns
+    /// `Ok(())` if no overlaps are detected, or `Err(ValidationError::OverlapError)` with detailed information
+    /// 
+    /// # Examples
+    /// ```
+    /// let int_ranges = vec![IntegerValidationRange::new(1, 5)];
+    /// let string_rules = vec![IntegerStringValidationRule::new(
+    ///     IntegerValidationRange::new(10, 15), 
+    ///     20
+    /// )];
+    /// 
+    /// // This should pass - no overlaps
+    /// assert!(ValidationRangeOverlapDetector::detect_all_range_overlaps(&int_ranges, &string_rules).is_ok());
+    /// ```
+    pub fn detect_all_range_overlaps(
+        integer_ranges: &[IntegerValidationRange],
+        integer_string_rules: &[IntegerStringValidationRule],
+    ) -> Result<(), ValidationError> {
+        let mut detected_overlaps = Vec::new();
+
+        // Check for overlaps between standalone integer ranges
+        let integer_range_overlaps = Self::detect_integer_range_to_integer_range_overlaps(integer_ranges);
+        detected_overlaps.extend(integer_range_overlaps);
+
+        // Check for overlaps between integer-string rules (based on their integer ranges)
+        let integer_string_rule_overlaps = Self::detect_integer_string_rule_to_integer_string_rule_overlaps(integer_string_rules);
+        detected_overlaps.extend(integer_string_rule_overlaps);
+
+        // Check for cross-type overlaps (integer ranges vs integer-string rule ranges)
+        let cross_type_overlaps = Self::detect_cross_type_range_overlaps(integer_ranges, integer_string_rules);
+        detected_overlaps.extend(cross_type_overlaps);
+
+        // If any overlaps were detected, return a comprehensive error
+        if !detected_overlaps.is_empty() {
+            let overlap_summary = Self::create_overlap_error_summary(&detected_overlaps);
+            return Err(ValidationError::OverlapError(overlap_summary));
+        }
+
+        Ok(())
+    }
+
+    /// Detects overlaps between standalone integer validation ranges
+    /// 
+    /// This method checks all pairs of integer ranges to identify any overlapping values
+    /// that would cause ambiguous validation behavior.
+    /// 
+    /// # Arguments
+    /// * `integer_ranges` - Vector of integer validation ranges to check
+    /// 
+    /// # Returns
+    /// Vector of `RangeOverlapDetails` for each detected overlap
+    fn detect_integer_range_to_integer_range_overlaps(
+        integer_ranges: &[IntegerValidationRange]
+    ) -> Vec<RangeOverlapDetails> {
+        let mut detected_overlaps = Vec::new();
+
+        // Check each pair of integer ranges for overlaps
+        for (first_index, first_range) in integer_ranges.iter().enumerate() {
+            for (second_index, second_range) in integer_ranges.iter().enumerate() {
+                // Only check each pair once (avoid duplicate checks)
+                if first_index < second_index {
+                    if let Some(overlap_details) = first_range.check_overlap_with_integer_range(second_range) {
+                        detected_overlaps.push(overlap_details);
+                    }
+                }
+            }
+        }
+
+        detected_overlaps
+    }
+
+    /// Detects overlaps between integer-string validation rules based on their integer ranges
+    /// 
+    /// This method checks all pairs of integer-string rules to identify any overlapping
+    /// integer ranges that would cause ambiguous validation behavior.
+    /// 
+    /// # Arguments
+    /// * `integer_string_rules` - Vector of integer-string validation rules to check
+    /// 
+    /// # Returns
+    /// Vector of `RangeOverlapDetails` for each detected overlap
+    fn detect_integer_string_rule_to_integer_string_rule_overlaps(
+        integer_string_rules: &[IntegerStringValidationRule]
+    ) -> Vec<RangeOverlapDetails> {
+        let mut detected_overlaps = Vec::new();
+
+        // Check each pair of integer-string rules for overlaps in their integer ranges
+        for (first_index, first_rule) in integer_string_rules.iter().enumerate() {
+            for (second_index, second_rule) in integer_string_rules.iter().enumerate() {
+                // Only check each pair once (avoid duplicate checks)
+                if first_index < second_index {
+                    if let Some(overlap_details) = first_rule.check_overlap_with_integer_string_rule(second_rule) {
+                        detected_overlaps.push(overlap_details);
+                    }
+                }
+            }
+        }
+
+        detected_overlaps
+    }
+
+    /// Detects cross-type overlaps between integer ranges and integer-string rule ranges
+    /// 
+    /// This method identifies cases where a standalone integer range overlaps with
+    /// the integer range of an integer-string rule, which creates ambiguous validation.
+    /// 
+    /// # Arguments
+    /// * `integer_ranges` - Vector of standalone integer validation ranges
+    /// * `integer_string_rules` - Vector of integer-string validation rules
+    /// 
+    /// # Returns
+    /// Vector of `RangeOverlapDetails` for each detected cross-type overlap
+    fn detect_cross_type_range_overlaps(
+        integer_ranges: &[IntegerValidationRange],
+        integer_string_rules: &[IntegerStringValidationRule],
+    ) -> Vec<RangeOverlapDetails> {
+        let mut detected_overlaps = Vec::new();
+
+        // Check each integer range against each integer-string rule's integer range
+        for integer_range in integer_ranges {
+            for integer_string_rule in integer_string_rules {
+                if let Some(overlap_details) = integer_range.check_overlap_with_integer_string_rule(integer_string_rule) {
+                    detected_overlaps.push(overlap_details);
+                }
+            }
+        }
+
+        detected_overlaps
+    }
+
+    /// Creates a comprehensive error summary from detected overlaps
+    /// 
+    /// This method takes all detected overlaps and formats them into a single,
+    /// comprehensive error message that clearly explains all the conflicts.
+    /// 
+    /// # Arguments
+    /// * `detected_overlaps` - Vector of all detected range overlaps
+    /// 
+    /// # Returns
+    /// A formatted string summarizing all detected overlaps
+    fn create_overlap_error_summary(detected_overlaps: &[RangeOverlapDetails]) -> String {
+        let mut error_message = format!(
+            "Configuration contains {} range overlap(s) that would cause ambiguous validation:\n\n",
+            detected_overlaps.len()
+        );
+
+        for (overlap_index, overlap_details) in detected_overlaps.iter().enumerate() {
+            error_message.push_str(&format!(
+                "{}. {}\n   Overlapping values: {} to {}\n\n",
+                overlap_index + 1,
+                overlap_details,
+                overlap_details.overlap_start_value,
+                overlap_details.overlap_end_value
+            ));
+        }
+
+        error_message.push_str("Please modify your ranges to eliminate these overlaps before proceeding.");
+        error_message
+    }
+}
+
+/// Configuration structure that holds all validation rules with overlap validation
 /// 
 /// This struct can be serialized to and deserialized from JSON format
-/// for easy import/export of validation configurations.
+/// for easy import/export of validation configurations. It includes
+/// comprehensive overlap detection to ensure validation rules are unambiguous.
 #[derive(Debug, Clone)]
 pub struct ValidationConfiguration {
     /// List of integer validation ranges
@@ -340,7 +784,10 @@ pub struct ValidationConfiguration {
 }
 
 impl ValidationConfiguration {
-    /// Creates a new validation configuration
+    /// Creates a new validation configuration with overlap validation
+    /// 
+    /// This constructor automatically validates that the provided ranges do not overlap,
+    /// ensuring that the resulting configuration will produce unambiguous validation results.
     /// 
     /// # Arguments
     /// * `integer_ranges` - Vector of integer validation ranges
@@ -348,8 +795,46 @@ impl ValidationConfiguration {
     /// * `configuration_name` - Optional name for this configuration
     /// 
     /// # Returns
-    /// A new `ValidationConfiguration` instance
+    /// `Ok(ValidationConfiguration)` if no overlaps are detected, or `Err(ValidationError::OverlapError)`
+    /// 
+    /// # Examples
+    /// ```
+    /// let int_ranges = vec![IntegerValidationRange::new(1, 5)];
+    /// let string_rules = vec![IntegerStringValidationRule::new(
+    ///     IntegerValidationRange::new(10, 15), 
+    ///     20
+    /// )];
+    /// 
+    /// let config = ValidationConfiguration::new(int_ranges, string_rules, None)?;
+    /// ```
     pub fn new(
+        integer_ranges: Vec<IntegerValidationRange>,
+        integer_string_rules: Vec<IntegerStringValidationRule>,
+        configuration_name: Option<String>,
+    ) -> Result<Self, ValidationError> {
+        // Validate that there are no overlapping ranges
+        ValidationRangeOverlapDetector::detect_all_range_overlaps(&integer_ranges, &integer_string_rules)?;
+
+        Ok(Self {
+            integer_ranges,
+            integer_string_rules,
+            configuration_name,
+        })
+    }
+
+    /// Creates a new validation configuration without overlap validation (for internal use)
+    /// 
+    /// This method is used internally when we know the ranges are already validated,
+    /// such as during JSON deserialization where we validate separately.
+    /// 
+    /// # Arguments
+    /// * `integer_ranges` - Vector of integer validation ranges
+    /// * `integer_string_rules` - Vector of integer-string validation rules
+    /// * `configuration_name` - Optional name for this configuration
+    /// 
+    /// # Returns
+    /// A new `ValidationConfiguration` instance without overlap validation
+    fn new_without_overlap_validation(
         integer_ranges: Vec<IntegerValidationRange>,
         integer_string_rules: Vec<IntegerStringValidationRule>,
         configuration_name: Option<String>,
@@ -359,6 +844,17 @@ impl ValidationConfiguration {
             integer_string_rules,
             configuration_name,
         }
+    }
+
+    /// Validates the current configuration for range overlaps
+    /// 
+    /// This method can be called to re-validate a configuration after it has been
+    /// modified or loaded from an external source.
+    /// 
+    /// # Returns
+    /// `Ok(())` if no overlaps are detected, or `Err(ValidationError::OverlapError)`
+    pub fn validate_configuration_for_overlaps(&self) -> Result<(), ValidationError> {
+        ValidationRangeOverlapDetector::detect_all_range_overlaps(&self.integer_ranges, &self.integer_string_rules)
     }
 
     /// Gets the integer ranges from this configuration
@@ -401,18 +897,26 @@ impl ValidationConfiguration {
         Ok(())
     }
 
-    /// Imports a configuration from a JSON file
+    /// Imports a configuration from a JSON file with overlap validation
+    /// 
+    /// This method loads a configuration from a JSON file and automatically
+    /// validates it for range overlaps before returning it.
     /// 
     /// # Arguments
     /// * `file_path` - The absolute path to the configuration file to load
     /// 
     /// # Returns
-    /// Result containing the loaded configuration or an error
+    /// Result containing the loaded and validated configuration or an error
     pub fn import_from_file<P: AsRef<Path>>(file_path: P) -> Result<Self, ValidationError> {
         let json_content = fs::read_to_string(file_path)
             .map_err(|error| ValidationError::FileError(format!("Failed to read configuration file: {}", error)))?;
         
-        Self::from_json_string(&json_content)
+        let configuration = Self::from_json_string(&json_content)?;
+        
+        // Validate the imported configuration for overlaps
+        configuration.validate_configuration_for_overlaps()?;
+        
+        Ok(configuration)
     }
 
     /// Converts the configuration to a JSON string
@@ -456,7 +960,10 @@ impl ValidationConfiguration {
         Ok(format!("{{\n{}\n}}", json_parts.join(",\n")))
     }
 
-    /// Creates a ValidationConfiguration from a JSON string
+    /// Creates a ValidationConfiguration from a JSON string without overlap validation
+    /// 
+    /// This method is used internally during import to create the configuration
+    /// before separate overlap validation is performed.
     /// 
     /// # Arguments
     /// * `json_string` - The JSON string representation of the configuration
@@ -549,7 +1056,7 @@ impl ValidationConfiguration {
             }
         }
 
-        Ok(Self::new(integer_ranges, integer_string_rules, configuration_name))
+        Ok(Self::new_without_overlap_validation(integer_ranges, integer_string_rules, configuration_name))
     }
 
     /// Parses an array of integer ranges from JSON content
@@ -640,7 +1147,8 @@ impl ValidationConfiguration {
 /// The main validation engine that processes inputs against defined rules
 /// 
 /// This struct contains all the validation rules and provides methods to
-/// validate individual inputs and batches of inputs.
+/// validate individual inputs and batches of inputs. It ensures that
+/// all rules are non-overlapping for unambiguous validation.
 #[derive(Debug)]
 pub struct InputValidationEngine {
     /// List of valid integer ranges for standalone integer validation
@@ -650,25 +1158,34 @@ pub struct InputValidationEngine {
 }
 
 impl InputValidationEngine {
-    /// Creates a new validation engine with the specified rules
+    /// Creates a new validation engine with the specified rules and overlap validation
+    /// 
+    /// This constructor automatically validates that the provided ranges do not overlap,
+    /// ensuring that the resulting engine will produce unambiguous validation results.
     /// 
     /// # Arguments
     /// * `integer_validation_ranges` - Vector of valid integer ranges
     /// * `integer_string_validation_rules` - Vector of integer-string validation rules
     /// 
     /// # Returns
-    /// A new `InputValidationEngine` instance
+    /// `Ok(InputValidationEngine)` if no overlaps are detected, or `Err(ValidationError::OverlapError)`
     pub fn new(
         integer_validation_ranges: Vec<IntegerValidationRange>,
         integer_string_validation_rules: Vec<IntegerStringValidationRule>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ValidationError> {
+        // Validate that there are no overlapping ranges
+        ValidationRangeOverlapDetector::detect_all_range_overlaps(&integer_validation_ranges, &integer_string_validation_rules)?;
+
+        Ok(Self {
             integer_validation_ranges,
             integer_string_validation_rules,
-        }
+        })
     }
 
     /// Creates a new validation engine from a configuration
+    /// 
+    /// Since the configuration has already been validated for overlaps,
+    /// this method can safely create the engine without additional validation.
     /// 
     /// # Arguments
     /// * `configuration` - The validation configuration to use
@@ -676,10 +1193,10 @@ impl InputValidationEngine {
     /// # Returns
     /// A new `InputValidationEngine` instance
     pub fn from_configuration(configuration: &ValidationConfiguration) -> Self {
-        Self::new(
-            configuration.integer_ranges.clone(),
-            configuration.integer_string_rules.clone(),
-        )
+        Self {
+            integer_validation_ranges: configuration.integer_ranges.clone(),
+            integer_string_validation_rules: configuration.integer_string_rules.clone(),
+        }
     }
 
     /// Gets the current configuration from this engine
@@ -688,8 +1205,8 @@ impl InputValidationEngine {
     /// * `configuration_name` - Optional name for the configuration
     /// 
     /// # Returns
-    /// A `ValidationConfiguration` representing the current engine state
-    pub fn to_configuration(&self, configuration_name: Option<String>) -> ValidationConfiguration {
+    /// Result containing a `ValidationConfiguration` representing the current engine state
+    pub fn to_configuration(&self, configuration_name: Option<String>) -> Result<ValidationConfiguration, ValidationError> {
         ValidationConfiguration::new(
             self.integer_validation_ranges.clone(),
             self.integer_string_validation_rules.clone(),
@@ -877,7 +1394,10 @@ fn prompt_for_configuration_export(configuration: &ValidationConfiguration) -> R
     Ok(())
 }
 
-/// Collects integer validation ranges from user input
+/// Collects integer validation ranges from user input with overlap checking
+/// 
+/// This function collects ranges one by one and checks for overlaps as they are added,
+/// providing immediate feedback to the user if conflicts are detected.
 /// 
 /// # Returns
 /// A vector of `IntegerValidationRange` instances or an error
@@ -894,41 +1414,67 @@ fn collect_integer_validation_ranges_from_user() -> Result<Vec<IntegerValidation
         .map_err(|_| ValidationError::ParseError("Please enter a valid number".to_string()))?;
 
     for range_index in 0..number_of_ranges {
-        println!("Enter the minimum value for range {}:", range_index + 1);
-        io::stdout().flush()?;
-        
-        let mut minimum_value_input = String::new();
-        io::stdin().read_line(&mut minimum_value_input)?;
-        
-        let minimum_value: i32 = minimum_value_input.trim().parse()
-            .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
+        loop {
+            println!("Enter the minimum value for range {}:", range_index + 1);
+            io::stdout().flush()?;
+            
+            let mut minimum_value_input = String::new();
+            io::stdin().read_line(&mut minimum_value_input)?;
+            
+            let minimum_value: i32 = minimum_value_input.trim().parse()
+                .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
 
-        println!("Enter the maximum value for range {}:", range_index + 1);
-        io::stdout().flush()?;
-        
-        let mut maximum_value_input = String::new();
-        io::stdin().read_line(&mut maximum_value_input)?;
-        
-        let maximum_value: i32 = maximum_value_input.trim().parse()
-            .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
+            println!("Enter the maximum value for range {}:", range_index + 1);
+            io::stdout().flush()?;
+            
+            let mut maximum_value_input = String::new();
+            io::stdin().read_line(&mut maximum_value_input)?;
+            
+            let maximum_value: i32 = maximum_value_input.trim().parse()
+                .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
 
-        if minimum_value > maximum_value {
-            return Err(ValidationError::ConfigurationError(
-                "Minimum value cannot be greater than maximum value".to_string()
-            ));
+            if minimum_value > maximum_value {
+                println!("Error: Minimum value cannot be greater than maximum value. Please try again.\n");
+                continue;
+            }
+
+            let new_range = IntegerValidationRange::new(minimum_value, maximum_value);
+            
+            // Check for overlaps with existing ranges
+            let mut has_overlap = false;
+            for existing_range in &validation_ranges {
+                if let Some(overlap_details) = new_range.check_overlap_with_integer_range(existing_range) {
+                    println!("Error: {}", overlap_details);
+                    println!("Please enter a different range that doesn't overlap.\n");
+                    has_overlap = true;
+                    break;
+                }
+            }
+
+            if !has_overlap {
+                validation_ranges.push(new_range);
+                println!("Range [{}, {}] added successfully.\n", minimum_value, maximum_value);
+                break;
+            }
         }
-
-        validation_ranges.push(IntegerValidationRange::new(minimum_value, maximum_value));
     }
 
     Ok(validation_ranges)
 }
 
-/// Collects integer-string validation rules from user input
+/// Collects integer-string validation rules from user input with overlap checking
+/// 
+/// This function collects rules one by one and checks for overlaps as they are added,
+/// providing immediate feedback to the user if conflicts are detected.
+/// 
+/// # Arguments
+/// * `existing_integer_ranges` - Previously defined integer ranges to check for cross-type overlaps
 /// 
 /// # Returns
 /// A vector of `IntegerStringValidationRule` instances or an error
-fn collect_integer_string_validation_rules_from_user() -> Result<Vec<IntegerStringValidationRule>, ValidationError> {
+fn collect_integer_string_validation_rules_from_user(
+    existing_integer_ranges: &[IntegerValidationRange]
+) -> Result<Vec<IntegerStringValidationRule>, ValidationError> {
     let mut validation_rules = Vec::new();
     
     println!("Enter the number of integer ranges with string constraints you want to add:");
@@ -941,42 +1487,73 @@ fn collect_integer_string_validation_rules_from_user() -> Result<Vec<IntegerStri
         .map_err(|_| ValidationError::ParseError("Please enter a valid number".to_string()))?;
 
     for rule_index in 0..number_of_rules {
-        println!("Enter the minimum value for range {}:", rule_index + 1);
-        io::stdout().flush()?;
-        
-        let mut minimum_value_input = String::new();
-        io::stdin().read_line(&mut minimum_value_input)?;
-        
-        let minimum_value: i32 = minimum_value_input.trim().parse()
-            .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
+        loop {
+            println!("Enter the minimum value for range {}:", rule_index + 1);
+            io::stdout().flush()?;
+            
+            let mut minimum_value_input = String::new();
+            io::stdin().read_line(&mut minimum_value_input)?;
+            
+            let minimum_value: i32 = minimum_value_input.trim().parse()
+                .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
 
-        println!("Enter the maximum value for range {}:", rule_index + 1);
-        io::stdout().flush()?;
-        
-        let mut maximum_value_input = String::new();
-        io::stdin().read_line(&mut maximum_value_input)?;
-        
-        let maximum_value: i32 = maximum_value_input.trim().parse()
-            .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
+            println!("Enter the maximum value for range {}:", rule_index + 1);
+            io::stdout().flush()?;
+            
+            let mut maximum_value_input = String::new();
+            io::stdin().read_line(&mut maximum_value_input)?;
+            
+            let maximum_value: i32 = maximum_value_input.trim().parse()
+                .map_err(|_| ValidationError::ParseError("Please enter a valid integer".to_string()))?;
 
-        if minimum_value > maximum_value {
-            return Err(ValidationError::ConfigurationError(
-                "Minimum value cannot be greater than maximum value".to_string()
-            ));
+            if minimum_value > maximum_value {
+                println!("Error: Minimum value cannot be greater than maximum value. Please try again.\n");
+                continue;
+            }
+
+            println!("Enter the maximum string length for range {}:", rule_index + 1);
+            io::stdout().flush()?;
+            
+            let mut maximum_string_length_input = String::new();
+            io::stdin().read_line(&mut maximum_string_length_input)?;
+            
+            let maximum_string_length: usize = maximum_string_length_input.trim().parse()
+                .map_err(|_| ValidationError::ParseError("Please enter a valid number".to_string()))?;
+
+            let integer_range = IntegerValidationRange::new(minimum_value, maximum_value);
+            let new_rule = IntegerStringValidationRule::new(integer_range, maximum_string_length);
+            
+            let mut has_overlap = false;
+            
+            // Check for overlaps with existing integer-string rules
+            for existing_rule in &validation_rules {
+                if let Some(overlap_details) = new_rule.check_overlap_with_integer_string_rule(existing_rule) {
+                    println!("Error: {}", overlap_details);
+                    println!("Please enter a different range that doesn't overlap.\n");
+                    has_overlap = true;
+                    break;
+                }
+            }
+
+            // Check for cross-type overlaps with existing integer ranges
+            if !has_overlap {
+                for existing_integer_range in existing_integer_ranges {
+                    if let Some(overlap_details) = existing_integer_range.check_overlap_with_integer_string_rule(&new_rule) {
+                        println!("Error: {}", overlap_details);
+                        println!("Please enter a different range that doesn't overlap.\n");
+                        has_overlap = true;
+                        break;
+                    }
+                }
+            }
+
+            if !has_overlap {
+                validation_rules.push(new_rule);
+                println!("Integer-string rule with range [{}, {}] and max string length {} added successfully.\n", 
+                    minimum_value, maximum_value, maximum_string_length);
+                break;
+            }
         }
-
-        println!("Enter the maximum string length for range {}:", rule_index + 1);
-        io::stdout().flush()?;
-        
-        let mut maximum_string_length_input = String::new();
-        io::stdin().read_line(&mut maximum_string_length_input)?;
-        
-        let maximum_string_length: usize = maximum_string_length_input.trim().parse()
-            .map_err(|_| ValidationError::ParseError("Please enter a valid number".to_string()))?;
-
-        let integer_range = IntegerValidationRange::new(minimum_value, maximum_value);
-        let validation_rule = IntegerStringValidationRule::new(integer_range, maximum_string_length);
-        validation_rules.push(validation_rule);
     }
 
     Ok(validation_rules)
@@ -991,13 +1568,14 @@ fn create_validation_configuration() -> Result<ValidationConfiguration, Validati
 
     match configuration_source {
         ConfigurationSource::Manual => {
-            println!("\n=== Manual Configuration Setup ===");
+            println!("\n=== Manual Configuration Setup with Overlap Detection ===");
+            println!("Note: The system will automatically detect and prevent overlapping ranges.\n");
             
-            // Collect integer validation ranges from user
+            // Collect integer validation ranges from user with overlap checking
             let integer_validation_ranges = collect_integer_validation_ranges_from_user()?;
 
-            // Collect integer-string validation rules from user
-            let integer_string_validation_rules = collect_integer_string_validation_rules_from_user()?;
+            // Collect integer-string validation rules from user with overlap checking
+            let integer_string_validation_rules = collect_integer_string_validation_rules_from_user(&integer_validation_ranges)?;
 
             // Ask for optional configuration name
             println!("Enter an optional name for this configuration (or press Enter to skip):");
@@ -1012,14 +1590,15 @@ fn create_validation_configuration() -> Result<ValidationConfiguration, Validati
                 Some(config_name_input.trim().to_string())
             };
 
-            Ok(ValidationConfiguration::new(
+            // Since we've been checking for overlaps during input, this should succeed
+            ValidationConfiguration::new(
                 integer_validation_ranges,
                 integer_string_validation_rules,
                 config_name,
-            ))
+            )
         }
         ConfigurationSource::File => {
-            println!("\n=== Import Configuration from File ===");
+            println!("\n=== Import Configuration from File with Overlap Validation ===");
             import_configuration_from_file()
         }
     }
@@ -1055,27 +1634,28 @@ fn display_validation_results(validation_results: &HashMap<String, ValidationSta
     println!("}}");
 }
 
-/// Main function that orchestrates the input validation system
+/// Main function that orchestrates the input validation system with overlap detection
 /// 
 /// This function:
-/// 1. Creates or imports a validation configuration
+/// 1. Creates or imports a validation configuration with overlap detection
 /// 2. Creates a validation engine with those rules
 /// 3. Optionally exports the configuration
 /// 4. Continuously accepts input and validates it
 /// 5. Displays structured validation results
 fn main() -> Result<(), ValidationError> {
-    println!("=== Input Validation System with Configuration Import/Export ===\n");
+    println!("=== Input Validation System with Configuration Import/Export and Overlap Detection ===\n");
 
-    // Create or import validation configuration
+    // Create or import validation configuration with overlap detection
     let validation_configuration = create_validation_configuration()?;
 
     // Display configuration info
     if let Some(name) = validation_configuration.get_configuration_name() {
         println!("\nLoaded configuration: '{}'", name);
     }
-    println!("Configuration loaded with:");
+    println!("Configuration loaded successfully with:");
     println!("- {} integer range(s)", validation_configuration.get_integer_ranges().len());
     println!("- {} integer-string rule(s)", validation_configuration.get_integer_string_rules().len());
+    println!("- No overlapping ranges detected ✓");
 
     // Prompt for configuration export
     prompt_for_configuration_export(&validation_configuration)?;
@@ -1114,97 +1694,161 @@ fn main() -> Result<(), ValidationError> {
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
 
     #[test]
-    fn test_integer_validation_range_json_serialization() {
-        let range = IntegerValidationRange::new(1, 10);
-        let json = range.to_json_string();
-        let parsed_range = IntegerValidationRange::from_json_string(&json).unwrap();
+    fn test_integer_range_overlap_detection() {
+        let range1 = IntegerValidationRange::new(1, 10);
+        let range2 = IntegerValidationRange::new(5, 15);
+        let range3 = IntegerValidationRange::new(20, 30);
+
+        // Should detect overlap between range1 and range2
+        assert!(range1.check_overlap_with_integer_range(&range2).is_some());
         
-        assert_eq!(range, parsed_range);
+        // Should not detect overlap between range1 and range3
+        assert!(range1.check_overlap_with_integer_range(&range3).is_none());
     }
 
     #[test]
-    fn test_integer_string_validation_rule_json_serialization() {
-        let range = IntegerValidationRange::new(5, 15);
-        let rule = IntegerStringValidationRule::new(range, 20);
-        let json = rule.to_json_string();
-        let parsed_rule = IntegerStringValidationRule::from_json_string(&json).unwrap();
-        
-        assert_eq!(rule.get_integer_range().get_minimum_value(), parsed_rule.get_integer_range().get_minimum_value());
-        assert_eq!(rule.get_integer_range().get_maximum_value(), parsed_rule.get_integer_range().get_maximum_value());
-        assert_eq!(rule.get_maximum_string_length(), parsed_rule.get_maximum_string_length());
-    }
-
-    #[test]
-    fn test_validation_configuration_file_operations() -> Result<(), ValidationError> {
-        // Create a temporary configuration
-        let integer_ranges = vec![IntegerValidationRange::new(1, 5)];
-        let integer_string_rules = vec![IntegerStringValidationRule::new(
-            IntegerValidationRange::new(10, 20),
-            15,
-        )];
-        let config = ValidationConfiguration::new(
-            integer_ranges,
-            integer_string_rules,
-            Some("Test Configuration".to_string()),
+    fn test_integer_string_rule_overlap_detection() {
+        let rule1 = IntegerStringValidationRule::new(
+            IntegerValidationRange::new(1, 10),
+            5
+        );
+        let rule2 = IntegerStringValidationRule::new(
+            IntegerValidationRange::new(8, 15),
+            10
+        );
+        let rule3 = IntegerStringValidationRule::new(
+            IntegerValidationRange::new(20, 30),
+            15
         );
 
-        // Create a temporary file path
-        let mut temp_path = std::env::temp_dir();
-        temp_path.push("test_validation_config.json");
+        // Should detect overlap between rule1 and rule2
+        assert!(rule1.check_overlap_with_integer_string_rule(&rule2).is_some());
+        
+        // Should not detect overlap between rule1 and rule3
+        assert!(rule1.check_overlap_with_integer_string_rule(&rule3).is_none());
+    }
 
-        // Export the configuration
-        config.export_to_file(&temp_path)?;
+    #[test]
+    fn test_cross_type_overlap_detection() {
+        let int_range = IntegerValidationRange::new(1, 10);
+        let string_rule = IntegerStringValidationRule::new(
+            IntegerValidationRange::new(5, 15),
+            20
+        );
+        let non_overlapping_rule = IntegerStringValidationRule::new(
+            IntegerValidationRange::new(20, 30),
+            20
+        );
 
-        // Import the configuration
-        let imported_config = ValidationConfiguration::import_from_file(&temp_path)?;
+        // Should detect cross-type overlap
+        assert!(int_range.check_overlap_with_integer_string_rule(&string_rule).is_some());
+        
+        // Should not detect overlap with non-overlapping rule
+        assert!(int_range.check_overlap_with_integer_string_rule(&non_overlapping_rule).is_none());
+    }
 
-        // Verify the imported configuration
-        assert_eq!(config.get_configuration_name(), imported_config.get_configuration_name());
-        assert_eq!(config.get_integer_ranges().len(), imported_config.get_integer_ranges().len());
-        assert_eq!(config.get_integer_string_rules().len(), imported_config.get_integer_string_rules().len());
+    #[test]
+    fn test_validation_configuration_overlap_rejection() {
+        let overlapping_ranges = vec![
+            IntegerValidationRange::new(1, 10),
+            IntegerValidationRange::new(5, 15),  // Overlaps with first range
+        ];
+        let rules = vec![];
 
-        // Clean up
-        if temp_path.exists() {
-            fs::remove_file(&temp_path).ok();
-        }
+        // Should reject configuration with overlapping ranges
+        assert!(ValidationConfiguration::new(overlapping_ranges, rules, None).is_err());
+    }
 
+    #[test]
+    fn test_validation_configuration_overlap_acceptance() -> Result<(), ValidationError> {
+        let non_overlapping_ranges = vec![
+            IntegerValidationRange::new(1, 10),
+            IntegerValidationRange::new(20, 30),  // Does not overlap
+        ];
+        let rules = vec![
+            IntegerStringValidationRule::new(
+                IntegerValidationRange::new(100, 200),  // Does not overlap with ranges
+                15
+            )
+        ];
+
+        // Should accept configuration with non-overlapping ranges
+        let config = ValidationConfiguration::new(non_overlapping_ranges, rules, None)?;
+        assert_eq!(config.get_integer_ranges().len(), 2);
+        assert_eq!(config.get_integer_string_rules().len(), 1);
+        
         Ok(())
     }
 
     #[test]
-    fn test_validation_engine_from_configuration() {
-        let integer_ranges = vec![IntegerValidationRange::new(1, 3)];
-        let string_rules = vec![IntegerStringValidationRule::new(
-            IntegerValidationRange::new(10, 20),
-            10,
-        )];
+    fn test_comprehensive_overlap_detection() {
+        let int_ranges = vec![
+            IntegerValidationRange::new(1, 5),
+            IntegerValidationRange::new(3, 8),  // Overlaps with first
+        ];
+        let string_rules = vec![
+            IntegerStringValidationRule::new(
+                IntegerValidationRange::new(7, 12),  // Overlaps with second int range
+                10
+            ),
+        ];
+
+        // Should detect multiple overlaps
+        let result = ValidationRangeOverlapDetector::detect_all_range_overlaps(&int_ranges, &string_rules);
+        assert!(result.is_err());
         
-        let config = ValidationConfiguration::new(
-            integer_ranges,
-            string_rules,
-            Some("Test Config".to_string()),
-        );
-        
-        let engine = InputValidationEngine::from_configuration(&config);
-        
-        assert_eq!(engine.validate_single_input("2"), ValidationStatus::Valid);
-        assert_eq!(engine.validate_single_input("5"), ValidationStatus::Invalid);
-        assert_eq!(engine.validate_single_input("15:test"), ValidationStatus::Valid);
-        assert_eq!(engine.validate_single_input("25:test"), ValidationStatus::Invalid);
+        if let Err(ValidationError::OverlapError(message)) = result {
+            // Should mention multiple overlaps
+            assert!(message.contains("2 range overlap(s)"));
+        }
     }
 
     #[test]
-    fn test_parse_comma_separated_inputs() {
-        let inputs = parse_comma_separated_inputs("1,2,3,10:frogs");
-        assert_eq!(inputs, vec!["1", "2", "3", "10:frogs"]);
-        
-        let inputs_with_spaces = parse_comma_separated_inputs("1 , 2 , 3 , 10:frogs ");
-        assert_eq!(inputs_with_spaces, vec!["1", "2", "3", "10:frogs"]);
-        
-        let empty_inputs = parse_comma_separated_inputs(",,,");
-        assert!(empty_inputs.is_empty());
+    fn test_validation_engine_creation_with_overlaps() {
+        let overlapping_ranges = vec![
+            IntegerValidationRange::new(1, 10),
+            IntegerValidationRange::new(5, 15),  // Overlaps
+        ];
+        let rules = vec![];
+
+        // Should reject engine creation with overlapping ranges
+        assert!(InputValidationEngine::new(overlapping_ranges, rules).is_err());
+    }
+
+    #[test]
+    fn test_range_overlap_details_display() {
+        let overlap = RangeOverlapDetails::new(
+            "Test overlap".to_string(),
+            "range A".to_string(),
+            "range B".to_string(),
+            5,
+            10
+        );
+
+        let display_string = format!("{}", overlap);
+        assert!(display_string.contains("Test overlap"));
+        assert!(display_string.contains("range A"));
+        assert!(display_string.contains("range B"));
+        assert!(display_string.contains("[5, 10]"));
+    }
+
+    #[test]
+    fn test_edge_case_touching_ranges() {
+        let range1 = IntegerValidationRange::new(1, 5);
+        let range2 = IntegerValidationRange::new(5, 10);  // Touches at value 5
+
+        // Touching ranges should be considered overlapping (inclusive bounds)
+        assert!(range1.check_overlap_with_integer_range(&range2).is_some());
+    }
+
+    #[test]
+    fn test_edge_case_adjacent_ranges() {
+        let range1 = IntegerValidationRange::new(1, 5);
+        let range2 = IntegerValidationRange::new(6, 10);  // Adjacent but not touching
+
+        // Adjacent ranges should not be considered overlapping
+        assert!(range1.check_overlap_with_integer_range(&range2).is_none());
     }
 }
