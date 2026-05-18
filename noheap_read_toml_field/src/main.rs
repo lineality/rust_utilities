@@ -82,6 +82,23 @@ read_single_line_string_field_from_toml_no_heap::<16, 256, 512>(path, "name")?;
 
 That trade is verbosity at call sites for full caller control of stack footprint. Pick whichever side you want; both are stack-only and heap-free.
 
+Note:
+case by case for need, these can be changed (to be larger or smaller-efficient values)
+
+/// Stack-allocated chunk size used for `File::read`.
+///
+/// Tradeoff: smaller chunks reduce stack pressure; larger chunks reduce syscall
+/// count. 256 B is comfortable on every realistic stack and keeps syscall
+/// overhead acceptable for the small-config use case this module targets.
+const RSLSF_READ_CHUNK_BYTES: usize = 16;
+
+/// Maximum bytes accumulated for a single line during scanning (stack-only).
+///
+/// Lines exceeding this limit do NOT silently truncate; see overflow handling
+/// in [`read_single_line_string_field_from_toml_no_heap`]. 512 B comfortably
+/// covers any realistic single-line TOML key/value in the in-scope subset.
+pub const RSLSF_MAX_LINE_BYTES: usize = 32;
+
 */
 
 mod read_toml_single_line_string_field_no_heap;
@@ -161,6 +178,7 @@ fn main() {
 
     // read demo file
     print_field_or_terse_error("text", &"test.toml".to_string());
+    print_field_or_terse_error("longtext", &"test.toml".to_string());
 
     std::process::exit(EXIT_OK);
 }

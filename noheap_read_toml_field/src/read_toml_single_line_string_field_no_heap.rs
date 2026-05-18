@@ -309,14 +309,14 @@ use std::io::Read;
 /// Tradeoff: smaller chunks reduce stack pressure; larger chunks reduce syscall
 /// count. 256 B is comfortable on every realistic stack and keeps syscall
 /// overhead acceptable for the small-config use case this module targets.
-const RSLSF_READ_CHUNK_BYTES: usize = 256;
+const RSLSF_READ_CHUNK_BYTES: usize = 16;
 
 /// Maximum bytes accumulated for a single line during scanning (stack-only).
 ///
 /// Lines exceeding this limit do NOT silently truncate; see overflow handling
 /// in [`read_single_line_string_field_from_toml_no_heap`]. 512 B comfortably
 /// covers any realistic single-line TOML key/value in the in-scope subset.
-pub const RSLSF_MAX_LINE_BYTES: usize = 512;
+pub const RSLSF_MAX_LINE_BYTES: usize = 32;
 
 /// Failsafe upper bound on total bytes scanned from a single file.
 ///
