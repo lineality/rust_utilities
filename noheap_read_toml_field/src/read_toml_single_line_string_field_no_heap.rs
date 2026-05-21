@@ -802,8 +802,8 @@ mod rslsf_tests {
 
     #[test]
     fn rslsf_returns_value_too_long_when_output_too_small() {
-        let test_path =
-            write_unique_temp_toml("too_long", "name = \"this-is-too-long-for-eight\"\n");
+        // "toolongxx" is 9 bytes, which exceeds the 8-byte output buffer.
+        let test_path = write_unique_temp_toml("too_long", "name = \"toolongxx\"\n");
         let result =
             read_single_line_string_field_from_toml_no_heap::<8>(path_as_str(&test_path), "name");
         assert_eq!(
